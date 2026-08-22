@@ -129,8 +129,8 @@ FS("/tmp")["hello.txt"] = "hello, world\n"   // write (create/truncate)
 FS("/tmp")["hello.txt"] += "goodbye\n"        // append (creates if absent)
 FS("/tmp")["blob.bin"]  = someData            // Data works too
 FS("/tmp")["copy.txt"]  = FS("/etc/hosts")    // assign a node = copy it
-FS("/tmp")["hello.txt"] = nil as String?      // remove
 let s: String? = FS("/tmp")["hello.txt"]      // the typed getter reads
+try FS("/tmp")["hello.txt"].remove()          // deleting stays explicit
 ```
 
 No `var` needed anywhere: the setters are `nonmutating` (the disk
@@ -142,6 +142,10 @@ The sugar is best-effort, SwiftyJSON style: setters cannot throw, so
 failures are silent — but never invisible, since the target node's
 `error` tells you what happened. Use the throwing `write(_:)` /
 `append(_:)` when you want errors raised.
+
+Deletion is deliberately *not* sugared: assigning `nil` is a no-op.
+`rm` is the one operation that deserves to look like what it is —
+`remove()`.
 
 ## `IO` — the streams
 

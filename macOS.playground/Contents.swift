@@ -60,7 +60,7 @@ try demo["hello.txt"].append("goodbye\n")
 demo["hello.txt"].stringValue
 
 //: ## Assignment sugar — the Perl-tie dream
-//: `=` writes, `+=` appends, `= FS(...)` copies, `= nil` removes.
+//: `=` writes, `+=` appends, `= FS(...)` copies.
 //: No `var` needed: the disk mutates, not the enum.
 demo["motd.txt"] = "hello, world\n"
 demo["motd.txt"].string
@@ -70,7 +70,8 @@ demo["hosts.copy"] = FS("/etc/hosts")        // copy a node
 demo["hosts.copy"].size
 let typed: String? = demo["motd.txt"]        // typed getter reads back
 typed
-demo["motd.txt"] = nil as String?            // remove
+//: Deletion is deliberately NOT sugared — rm should look like rm:
+try demo["motd.txt"].remove()
 demo["motd.txt"].exists
 //: Failures are silent (setters cannot throw) but never invisible:
 FS("/etc/hosts")["nope"] = "denied"          // ENOTDIR — a no-op

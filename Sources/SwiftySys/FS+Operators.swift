@@ -7,7 +7,6 @@
 //      FS("/tmp")["hello.txt"] = "hello, world\n"   // write
 //      FS("/tmp")["hello.txt"] += "goodbye\n"        // append
 //      FS("/tmp")["copy.txt"]  = FS("/etc/hosts")    // copy
-//      FS("/tmp")["hello.txt"] = nil as String?      // remove
 //
 //  Swift cannot overload plain `=`, but a subscript with a
 //  `nonmutating set` gets the exact same syntax — and works on
@@ -46,23 +45,21 @@ extension FS {
     /// FS("/tmp")["f.txt"] = "hello"        // write (create/truncate)
     /// FS("/tmp")["f.txt"] = someData       // works for Data too
     /// let s: String? = FS("/tmp")["f.txt"] // and reads back
-    /// FS("/tmp")["f.txt"] = nil as String? // remove
     /// ```
     ///
     /// The plain getter `dir["f.txt"]` still returns an `FS` node —
     /// this typed one only kicks in where the context asks for
     /// `String?` or `Data?`.
+    ///
+    /// Assigning `nil` is a deliberate no-op: deleting a file deserves
+    /// an explicit `remove()`, not an assignment.
     public subscript<Content: FSContent>(_ name: String) -> Content? {
         get {
             self[name].data.flatMap(Content.init(fsContentData:))
         }
         nonmutating set {
-            let target: FS = self[name]
-            if let newValue {
-                try? target.write(newValue.fsContentData)
-            } else {
-                try? target.remove()
-            }
+            guard let newValue else { return }
+            try? self[name].write(newValue.fsContentData)
         }
     }
 

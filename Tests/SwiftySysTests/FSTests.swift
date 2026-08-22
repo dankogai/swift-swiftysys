@@ -83,12 +83,14 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
         }
     }
 
-    @Test func nilRemoves() throws {
+    @Test func nilAssignmentIsNoOp() throws {
         try withTempDir { dir in
-            dir["doomed.txt"] = "x"
-            #expect(dir["doomed.txt"].isFile)
-            dir["doomed.txt"] = nil as String?
-            #expect(!dir["doomed.txt"].exists)
+            dir["kept.txt"] = "still here"
+            // deleting deserves an explicit remove(), not `= nil`
+            dir["kept.txt"] = nil as String?
+            #expect(dir["kept.txt"].string == "still here")
+            try dir["kept.txt"].remove()
+            #expect(!dir["kept.txt"].exists)
         }
     }
 
