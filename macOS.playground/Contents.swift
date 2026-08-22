@@ -124,6 +124,18 @@ let failing = try IO.readPipe(from: ["false"])
 try failing.readAll()
 try failing.close()                      // 1
 
+//: ## open3 — stdout and stderr, separately (IPC::Open3)
+let p3 = try IO.open3("echo output; echo diagnostics >&2")
+try p3.stdout.readString()               // "output\n"
+try p3.stderr.readString()               // "diagnostics\n"
+p3.close()
+//: `capture` feeds stdin and slurps both sides with poll(2) —
+//: no pipe-buffer deadlocks, ever:
+let r = try IO.open3(["tr", "a-z", "A-Z"]).capture(stdin: "shout this\n")
+r.stdoutString                           // "SHOUT THIS\n"
+r.stderrString                           // ""
+r.status                                 // 0
+
 //: ## FS meets IO
 let log = try demo["run.log"].open(.append)   // node → stream
 try log.write("it just works\n")

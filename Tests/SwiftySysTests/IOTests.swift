@@ -156,6 +156,72 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     }
 }
 
+@Suite struct Open3Tests {
+    @Test func separatesTheStreams() throws {
+        let p = try IO.open3("echo out; echo err >&2")
+        #expect(try p.stdout.readString() == "out\n")
+        #expect(try p.stderr.readString() == "err\n")
+        #expect(p.close() == 0)
+        #expect(p.terminationStatus == 0)
+    }
+
+    @Test func argvFormNoShell() throws {
+        let evil = "$(whoami); echo pwned >&2"
+        let p = try IO.open3(["echo", evil])
+        #expect(try p.stdout.readString() == evil + "\n")
+        #expect(try p.stderr.readString() == "")
+        #expect(p.close() == 0)
+    }
+
+    @Test func stdinFlows() throws {
+        let p = try IO.open3(["tr", "a-z", "A-Z"])
+        try p.stdin.write("hello, open3\n")
+        try p.stdin.close()
+        #expect(try p.stdout.readString() == "HELLO, OPEN3\n")
+        #expect(p.close() == 0)
+    }
+
+    @Test func captureBasics() throws {
+        let r = try IO.open3("echo out; echo err >&2; exit 7").capture()
+        #expect(r.stdoutString == "out\n")
+        #expect(r.stderrString == "err\n")
+        #expect(r.status == 7)
+    }
+
+    @Test func captureFeedsStdin() throws {
+        let r = try IO.open3(["tr", "a-z", "A-Z"]).capture(stdin: "mixed Case\n")
+        #expect(r.stdoutString == "MIXED CASE\n")
+        #expect(r.stderr.isEmpty)
+        #expect(r.status == 0)
+    }
+
+    @Test func captureBigStderrDoesNotDeadlock() throws {
+        // way past the 64KB pipe buffer, all on the "wrong" stream
+        let r = try IO.open3("head -c 300000 /dev/zero >&2").capture()
+        #expect(r.stdout.isEmpty)
+        #expect(r.stderr.count == 300_000)
+        #expect(r.status == 0)
+    }
+
+    @Test func captureBigRoundTrip() throws {
+        // stdin and stdout both far beyond the pipe buffer
+        let blob = Data((0..<300_000).map { UInt8($0 % 251) })
+        let r = try IO.open3(["cat"]).capture(stdin: blob)
+        #expect(r.stdout == blob)
+        #expect(r.status == 0)
+    }
+
+    @Test func closeIsIdempotent() throws {
+        let p = try IO.open3(["true"])
+        #expect(p.close() == 0)
+        #expect(p.close() == 0)
+    }
+
+    @Test func emptyArgvThrows() {
+        #expect(throws: Errno.invalidArgument) { try IO.open3([]) }
+    }
+}
+
 @Suite struct Qx {
     @Test func capturesOutput() throws {
         #expect(try qx("echo hello") == "hello\n")

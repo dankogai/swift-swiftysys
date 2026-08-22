@@ -25,7 +25,7 @@ public final class IO {
         case read, write, append, readWrite
     }
 
-    private let fd: FileDescriptor
+    internal let fd: FileDescriptor
     private let ownsFD: Bool
     private var process: Process?
     private var handle: FileHandle?     // keeps a pipe's fd alive
@@ -33,7 +33,7 @@ public final class IO {
     /// Exit status of the piped process, available after `close()`.
     public private(set) var terminationStatus: Int32?
 
-    private init(fd: FileDescriptor, ownsFD: Bool,
+    internal init(fd: FileDescriptor, ownsFD: Bool,
                  process: Process? = nil, handle: FileHandle? = nil) {
         self.fd = fd
         self.ownsFD = ownsFD
@@ -156,7 +156,7 @@ public final class IO {
 
     /// execvp(3)-style PATH resolution. A name containing `/` is used
     /// as-is; otherwise each PATH entry is tried for an executable.
-    private static func which(_ cmd: String) throws -> String {
+    internal static func which(_ cmd: String) throws -> String {
         if cmd.contains("/") { return cmd }
         let path = getenv("PATH").map { String(cString: $0) } ?? "/usr/bin:/bin"
         for dir in path.split(separator: ":", omittingEmptySubsequences: false) {

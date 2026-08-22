@@ -158,6 +158,7 @@ IO.open(path, .read | .write | .append | .readWrite)
 IO.popen(command, .read | .write)          // via /bin/sh -c
 IO.readPipe(from: ["ls", "-la", path])     // "cmd |"  — argv, NO shell
 IO.writePipe(to: ["sort", "-o", output])   // "| cmd"  — argv, NO shell
+IO.open3(argv) / IO.open3(command)         // stdin + stdout + stderr
 
 // Perl-style 2-arg open — sugar for literals
 IO.open("< in.txt")        // read (the "<" is optional)
@@ -171,6 +172,33 @@ IO.open("ls -la |")        // pipe: read command's stdout
 (`open $fh, "-|", @cmd` / `open $fh, "|-", @cmd`): the argv is executed
 directly — `argv[0]` resolved against `PATH`, execvp(3)-style — so
 arguments arrive verbatim and there is nothing to inject.
+
+### open3 — stdout and stderr, separately
+
+`IO.open3` is Perl's `IPC::Open3`: a child with all three standard
+streams piped, taking either an argv list (no shell) or a command
+string (via `/bin/sh -c`):
+
+```swift
+let p = try IO.open3(["make", "-j8"])
+try p.stdin.close()
+let out = try p.stdout.readString()
+let err = try p.stderr.readString()
+p.close()                        // waits; exit status (Perl's $?)
+```
+
+Reading one pipe to EOF while the other fills is open3's classic
+deadlock — so when you just want everything, use `capture`, which
+multiplexes all three descriptors with `poll(2)` on a single thread;
+no amount of output on either stream can wedge the child:
+
+```swift
+let r = try IO.open3(["cc", "-c", "broken.c"]).capture()
+r.stdoutString                   // captured stdout
+r.stderrString                   // the diagnostics you wanted
+r.status                         // exit status
+try IO.open3(["tr", "a-z", "A-Z"]).capture(stdin: "feed me\n")
+```
 
 Reading and writing: `read(_ count:)`, `readAll()`, `readString()`,
 `write(Data)`, `write(String)`. `close()` is idempotent; for pipes it
