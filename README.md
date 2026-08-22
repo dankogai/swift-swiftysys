@@ -1,2 +1,207 @@
-# swift-swiftyfs
-File System Operation made Swifty
+# swift-swiftysys
+
+[![CI via GitHub Actions](https://github.com/dankogai/swift-swiftysys/actions/workflows/swift.yml/badge.svg)](https://github.com/dankogai/swift-swiftysys/actions/workflows/swift.yml)
+
+System programming made Swifty — as easy as Perl, Python, or Ruby, yet
+swifty. Two types, Ruby's split with Perl's soul:
+
+- **`FS`** — the *namespace* view: filesystem nodes as a value-type enum,
+  chainable without force-unwrapping, in the spirit of [SwiftyJSON].
+- **`IO`** — the *stream* view: open file descriptors as reference types —
+  files, pipes to processes (Perl's 2-arg `open` and `qx()` included),
+  and, on the roadmap, sockets.
+
+[SwiftyJSON]: https://github.com/SwiftyJSON/SwiftyJSON
+
+```swift
+import SwiftySys
+
+// ---- FS: nodes ----
+FS("/etc/hosts")        // FS.file(/etc/hosts)
+FS("/nonexistent")      // FS.error(ENOENT, /nonexistent)
+
+let node = FS("/tmp")["a"]["b.txt"]   // chain — no `!`, no `?`, no `try`
+node.string             // String?  — nil on error
+node.stringValue        // String   — "" on error
+try node.read()         // Data     — throws the Errno
+node.size               // Int64?
+node.mtime              // Date?
+node.error              // Errno?   — what went wrong, if anything
+
+for (name, node) in FS("/var/log") {  // directories iterate like [String: FS]
+    print(name, node.sizeValue)
+}
+
+try FS("/tmp")["hello.txt"].write("hello, world\n")
+try FS("/tmp")["a"]["b"]["c"].mkdir(withIntermediates: true)
+try FS("/tmp")["a"].remove(recursively: true)
+
+// ---- IO: streams ----
+let out = try IO.open("> /tmp/out.txt")     // Perl-style 2-arg open
+try out.write("hello\n")
+try out.close()
+
+let sorted = try IO.open("sort -u /tmp/words.txt |")   // read from a command
+print(try sorted.readString())
+
+let sink = try IO.open("| wc -l")           // write to a command
+try sink.write("a\nb\nc\n")
+try sink.close()                            // waits; exit status returned
+
+try qx("uname -a")                          // Perl's backticks
+
+// ---- and they meet ----
+let log = try FS.temp["build.log"].open(.append)   // FS node → IO stream
+```
+
+## `FS` — the namespace
+
+### One type, eight cases
+
+```swift
+public enum FS {
+    case file(FilePath)
+    case directory(FilePath)
+    case symlink(FilePath)
+    case fifo(FilePath)
+    case socket(FilePath)
+    case blockDevice(FilePath)
+    case characterDevice(FilePath)
+    case error(Errno, FilePath)     // errno + WHERE it failed
+}
+```
+
+`FS(_:)` performs a single `lstat(2)` and picks the case. Symlinks are
+not followed — a symlink reports as `.symlink`; use `resolved()` to
+follow it. (`FilePath` and `Errno` come from Apple's [swift-system],
+re-exported for your convenience.)
+
+[swift-system]: https://github.com/apple/swift-system
+
+### Error propagation
+
+Subscripting a node that is already `.error` propagates the error, so
+chains are always safe. The error carries the *path where the failure
+occurred*, with one deliberate refinement per errno:
+
+- `ENOENT` **extends**: `FS("/tmp")["no"]["such"]["file.txt"]` is
+  `.error(ENOENT, /tmp/no/such/file.txt)` — the full intended path, so a
+  `write(_:)`, `mkdir(withIntermediates: true)`, or `open(.write)` at
+  the end of the chain knows where to create.
+- Everything else **freezes at the origin**:
+  `FS("/etc/passwd")["x"]["y"]` is `.error(ENOTDIR, /etc/passwd)` —
+  it reports where things went wrong, not some phantom descendant.
+
+### Terminal accessors, SwiftyJSON style
+
+| optional (`nil` on error) | non-optional (empty on error) | throwing |
+|---------------------------|-------------------------------|----------|
+| `data: Data?`             | `dataValue: Data`             | `read()` |
+| `string: String?`         | `stringValue: String`         | `readString()` |
+| `size: Int64?`            | `sizeValue: Int64`            |          |
+
+Plus `mtime`, `atime`, `ctime`, `mode`, `permissions`, `uid`, `gid`,
+`nlink`, `inode`, `device` — all `Optional`, all computed from a fresh
+`lstat(2)` at each access (so they track the disk even if the enum case
+has gone stale; `refreshed()` re-examines the case itself).
+
+### Directories as dictionaries
+
+`FS` conforms to `Sequence`, yielding `(name: String, node: FS)` pairs
+sorted by name. Non-directories (including `.error`) yield nothing, so
+iteration never throws. `keys`, `children`, and `count` come along, and
+`filter` / `map` / `contains` come for free — which is where Swift
+starts to beat Perl.
+
+### Mutation
+
+`write`, `append`, `mkdir`, `remove`, and `symlink(to:)` all throw
+`Errno` on failure and return the fresh node on success
+(`@discardableResult`).
+
+## `IO` — the streams
+
+`IO` is a `class` (it owns a live file descriptor) with explicit
+primitives and Perl sugar on top:
+
+```swift
+// explicit — use these when anything is not a literal
+IO.open(path, .read | .write | .append | .readWrite)
+IO.popen(command, .read | .write)      // via /bin/sh -c
+
+// Perl-style 2-arg open — sugar for literals
+IO.open("< in.txt")        // read (the "<" is optional)
+IO.open("> out.txt")       // create/truncate
+IO.open(">> log.txt")      // create/append
+IO.open("| sort -u")       // pipe: write to command's stdin
+IO.open("ls -la |")        // pipe: read command's stdout
+```
+
+Reading and writing: `read(_ count:)`, `readAll()`, `readString()`,
+`write(Data)`, `write(String)`. `close()` is idempotent; for pipes it
+waits for the process and returns the exit status (also kept in
+`terminationStatus`) — Perl's `close` setting `$?`. `IO.stdin` /
+`.stdout` / `.stderr` wrap the standard descriptors.
+
+`qx(_:)` is the backtick: runs a command through the shell and returns
+its stdout as a `String`.
+
+> **A word on the magic.** Interpolating untrusted strings into a 2-arg
+> open spec is the same injection Perl is famous for — that is *why*
+> Perl grew 3-arg open. The sugar is for literals; the explicit
+> primitives are right there for everything else.
+
+### The bridge
+
+`FS.open(_ mode:)` turns a node into a stream, and honors the ENOENT
+rule — a chain into a not-yet-existing file opens fine with a creating
+mode:
+
+```swift
+let out = try FS.temp["results"]["run1.log"].open(.write)
+```
+
+## Usage
+
+### Swift Package Manager
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/dankogai/swift-swiftysys", from: "0.1.0")
+]
+```
+
+and add `"SwiftySys"` to your target dependencies.
+
+### In the REPL
+
+```sh
+swift run --repl
+```
+
+```swift
+import SwiftySys
+FS.home[".zshrc"].string
+try qx("uptime")
+```
+
+## Roadmap
+
+- `IO` sockets (`IO.connect(...)`, and opening `FS`'s `.socket`/`.fifo` nodes)
+- Buffered line iteration (`for line in io.lines`)
+- `copy` / `move`, glob
+- Maybe: the dictionary-style subscript *setter*
+  (`FS("/tmp")["foo.txt"] = ...`) — cute, deliberately deferred
+
+## Caveats
+
+- **macOS and Linux only.** Not iOS — but then, neither is scripting.
+- **The `FS` case is a snapshot.** It is decided by one `lstat(2)` at
+  construction; if the disk changes afterward the value is stale
+  (a `.file` that has been deleted still says `.file`). Perl and Python
+  live with the same TOCTOU reality. Use `refreshed()` when it matters;
+  the stat accessors (`size`, `mtime`, …) always re-stat anyway.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
