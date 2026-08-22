@@ -136,6 +136,22 @@ r.stdoutString                           // "SHOUT THIS\n"
 r.stderrString                           // ""
 r.status                                 // 0
 
+//: ## Sys — the process view (Python's sys, Perl's core variables)
+Sys.argv                                 // @ARGV, argv[0] included
+Sys.executable                           // the running binary, as an FS node
+Sys.pid                                  // $$
+Sys.user                                 // who am I
+Sys.platform                             // "darwin"
+Sys.uname.machine                        // "arm64"?
+Sys.hostname
+Sys.cpuCount
+Sys.byteOrder
+//: The environment is a dictionary — %ENV:
+Sys.env["HOME"]
+Sys.env["SWIFTYSYS"] = "playground"      // setenv — children see it
+try qx("printf '%s' \"$SWIFTYSYS\"")     // proof
+Sys.env.unset("SWIFTYSYS")
+
 //: ## FS meets IO
 let log = try demo["run.log"].open(.append)   // node → stream
 try log.write("it just works\n")

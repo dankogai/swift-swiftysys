@@ -3,13 +3,16 @@
 [![CI via GitHub Actions](https://github.com/dankogai/swift-swiftysys/actions/workflows/swift.yml/badge.svg)](https://github.com/dankogai/swift-swiftysys/actions/workflows/swift.yml)
 
 System programming made Swifty — as easy as Perl, Python, or Ruby, yet
-swifty. Two types, Ruby's split with Perl's soul:
+swifty. Three pillars, Ruby's split with Perl's soul:
 
 - **`FS`** — the *namespace* view: filesystem nodes as a value-type enum,
   chainable without force-unwrapping, in the spirit of [SwiftyJSON].
 - **`IO`** — the *stream* view: open file descriptors as reference types —
-  files, pipes to processes (Perl's 2-arg `open` and `qx()` included),
-  and, on the roadmap, sockets.
+  files, pipes to processes (Perl's 2-arg `open`, `qx()`, and
+  `IPC::Open3` included), and, on the roadmap, sockets.
+- **`Sys`** — the *process* view: Python's `sys` plus the Perl core
+  variables every script reaches for — `argv`, `env`, `exit`, `pid`,
+  `platform`, `uname`, and friends.
 
 [SwiftyJSON]: https://github.com/SwiftyJSON/SwiftyJSON
 
@@ -51,8 +54,18 @@ try sink.close()                            // waits; exit status returned
 
 try qx("uname -a")                          // Perl's backticks
 
+// ---- Sys: the process ----
+Sys.argv                                    // [String] — sys.argv / @ARGV
+Sys.env["HOME"]                             // String?  — %ENV
+Sys.env["DEBUG"] = "1"                      // setenv
+Sys.pid                                     // $$
+Sys.platform                                // "darwin" | "linux"
+Sys.uname.machine                           // "arm64", "x86_64", ...
+Sys.exit(0)                                 // sys.exit
+
 // ---- and they meet ----
 let log = try FS.temp["build.log"].open(.append)   // FS node → IO stream
+Sys.executable                                     // the running binary, as an FS node
 ```
 
 ## `FS` — the namespace
@@ -223,6 +236,35 @@ mode:
 
 ```swift
 let out = try FS.temp["results"]["run1.log"].open(.write)
+```
+
+## `Sys` — the process
+
+A caseless enum: a pure namespace, nothing to instantiate.
+
+| | |
+|---|---|
+| `Sys.argv` | `[String]`, `argv[0]` included — `sys.argv`, `@ARGV` |
+| `Sys.env` | dictionary-style environment — `%ENV` (below) |
+| `Sys.exit(_:)` | terminate with a status — `sys.exit` |
+| `Sys.executable` | the running binary, as an `FS` node — `sys.executable` |
+| `Sys.pid` / `ppid` | process ids — `$$` |
+| `Sys.uid` / `euid` / `gid` / `egid` | user/group ids — `$<`, `$>`, `$(`, `$)` |
+| `Sys.user` | effective user's login name |
+| `Sys.platform` | `"darwin"` / `"linux"` — `sys.platform` |
+| `Sys.byteOrder` | `"little"` / `"big"` — `sys.byteorder` |
+| `Sys.hostname` / `osVersion` / `cpuCount` | the machine |
+| `Sys.uname` | `uname(2)` decoded: sysname/nodename/release/version/machine |
+| `Sys.stdin` / `stdout` / `stderr` | the standard `IO` streams — `sys.stdin` & co. |
+
+The environment reads and writes like the dictionary it morally is,
+and iterates sorted:
+
+```swift
+Sys.env["PATH"]                  // String?
+Sys.env["DEBUG"] = "1"           // setenv — visible to children
+Sys.env.unset("DEBUG")           // unsetenv (assigning nil works too)
+for (key, value) in Sys.env { print("\(key)=\(value)") }
 ```
 
 ## Usage
