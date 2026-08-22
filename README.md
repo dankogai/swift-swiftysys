@@ -32,7 +32,8 @@ for (name, node) in FS("/var/log") {  // directories iterate like [String: FS]
     print(name, node.sizeValue)
 }
 
-try FS("/tmp")["hello.txt"].write("hello, world\n")
+FS("/tmp")["hello.txt"] = "hello, world\n"    // = writes...
+FS("/tmp")["hello.txt"] += "goodbye\n"        // ...+= appends
 try FS("/tmp")["a"]["b"]["c"].mkdir(withIntermediates: true)
 try FS("/tmp")["a"].remove(recursively: true)
 
@@ -119,6 +120,29 @@ starts to beat Perl.
 `Errno` on failure and return the fresh node on success
 (`@discardableResult`).
 
+### Assignment sugar
+
+The dictionary metaphor goes all the way — `=` writes, `+=` appends:
+
+```swift
+FS("/tmp")["hello.txt"] = "hello, world\n"   // write (create/truncate)
+FS("/tmp")["hello.txt"] += "goodbye\n"        // append (creates if absent)
+FS("/tmp")["blob.bin"]  = someData            // Data works too
+FS("/tmp")["copy.txt"]  = FS("/etc/hosts")    // assign a node = copy it
+FS("/tmp")["hello.txt"] = nil as String?      // remove
+let s: String? = FS("/tmp")["hello.txt"]      // the typed getter reads
+```
+
+No `var` needed anywhere: the setters are `nonmutating` (the disk
+mutates, not the enum), so this works on freshly-constructed rvalues.
+Swift cannot overload plain `=`, but a subscript setter gets the exact
+same syntax.
+
+The sugar is best-effort, SwiftyJSON style: setters cannot throw, so
+failures are silent — but never invisible, since the target node's
+`error` tells you what happened. Use the throwing `write(_:)` /
+`append(_:)` when you want errors raised.
+
 ## `IO` — the streams
 
 `IO` is a `class` (it owns a live file descriptor) with explicit
@@ -198,8 +222,6 @@ try qx("uptime")
 - `IO` sockets (`IO.connect(...)`, and opening `FS`'s `.socket`/`.fifo` nodes)
 - Buffered line iteration (`for line in io.lines`)
 - `copy` / `move`, glob
-- Maybe: the dictionary-style subscript *setter*
-  (`FS("/tmp")["foo.txt"] = ...`) — cute, deliberately deferred
 
 ## Caveats
 

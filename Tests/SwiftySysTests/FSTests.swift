@@ -32,15 +32,97 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
         #expect(node.size == nil)
     }
 
-    @Test func stringLiteral() {
-        let tmp: FS = "/tmp"
-        #expect(tmp.exists)
-    }
-
     @Test func wellKnownLocations() {
         #expect(FS.cwd.isDirectory)
         #expect(FS.home.isDirectory)
         #expect(FS.temp.isDirectory)
+    }
+}
+
+@Suite struct Operators {
+    @Test func assignmentWrites() throws {
+        try withTempDir { dir in
+            dir["hello.txt"] = "hello, world\n"
+            #expect(dir["hello.txt"].string == "hello, world\n")
+            // truncates on reassignment
+            dir["hello.txt"] = "goodbye\n"
+            #expect(dir["hello.txt"].string == "goodbye\n")
+        }
+    }
+
+    @Test func assignmentWritesData() throws {
+        try withTempDir { dir in
+            let blob = Data([0x00, 0xFF, 0x7F])
+            dir["blob.bin"] = blob
+            #expect(dir["blob.bin"].data == blob)
+        }
+    }
+
+    @Test func plusEqualsAppends() throws {
+        try withTempDir { dir in
+            dir["log.txt"] += "one\n"     // creates
+            dir["log.txt"] += "two\n"     // appends
+            #expect(dir["log.txt"].string == "one\ntwo\n")
+        }
+    }
+
+    @Test func plusEqualsOnVar() throws {
+        try withTempDir { dir in
+            var log = dir["direct.log"]
+            log += "line\n"
+            #expect(log.isFile)           // refreshed after the append
+            #expect(log.string == "line\n")
+        }
+    }
+
+    @Test func assignmentCopiesNodes() throws {
+        try withTempDir { dir in
+            try dir["src.txt"].write("source content\n")
+            dir["dst.txt"] = dir["src.txt"]
+            #expect(dir["dst.txt"].string == "source content\n")
+        }
+    }
+
+    @Test func nilRemoves() throws {
+        try withTempDir { dir in
+            dir["doomed.txt"] = "x"
+            #expect(dir["doomed.txt"].isFile)
+            dir["doomed.txt"] = nil as String?
+            #expect(!dir["doomed.txt"].exists)
+        }
+    }
+
+    @Test func typedGetterReads() throws {
+        try withTempDir { dir in
+            dir["f.txt"] = "typed\n"
+            let s: String? = dir["f.txt"]
+            #expect(s == "typed\n")
+            let d: Data? = dir["f.txt"]
+            #expect(d == Data("typed\n".utf8))
+            let missing: String? = dir["nope.txt"]
+            #expect(missing == nil)
+        }
+    }
+
+    @Test func worksOnRvalues() throws {
+        try withTempDir { dir in
+            // no var needed anywhere — the disk mutates, not the enum
+            FS(dir.pathString)["rvalue.txt"] = "works\n"
+            FS(dir.pathString)["rvalue.txt"] += "twice\n"
+            #expect(dir["rvalue.txt"].string == "works\ntwice\n")
+        }
+    }
+
+    @Test func failuresAreSilentButVisible() throws {
+        try withTempDir { dir in
+            let file = try dir["plain.txt"].write("x")
+            file["child.txt"] = "nope"          // ENOTDIR — silently no-op
+            #expect(file["child.txt"].error == .notDirectory)
+            #expect(dir.keys == ["plain.txt"])  // nothing was created
+            // copying from an unreadable source is a no-op too
+            dir["copy.txt"] = FS("/nonexistent-\(UUID().uuidString)")
+            #expect(!dir["copy.txt"].exists)
+        }
     }
 }
 

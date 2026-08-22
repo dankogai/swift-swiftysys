@@ -110,17 +110,34 @@ public enum FS: Sendable, Equatable, Hashable {
     /// - On any other `.error`, propagates unchanged, so the error
     ///   still reports the path where the failure originated.
     /// - On a non-directory node, returns `.error(.notDirectory, path)`.
+    ///
+    /// The *setter* copies: `dir["copy.txt"] = FS("/etc/hosts")` writes
+    /// the source node's contents into the child. (For literal content,
+    /// see the `FSContent` subscript: `dir["f.txt"] = "hello"`.)
+    /// Like all assignment sugar it is best-effort — failures are
+    /// silent; inspect the node's `error` afterward, or use the
+    /// throwing `write(_:)` instead.
     public subscript(_ name: String) -> FS {
-        switch self {
-        case .directory(let p):
-            return FS(p.appending(name))
-        case .error(.noSuchFileOrDirectory, let p):
-            return FS(p.appending(name))
-        case .error:
-            return self
-        case .file(let p), .symlink(let p), .fifo(let p), .socket(let p),
-             .blockDevice(let p), .characterDevice(let p):
-            return .error(.notDirectory, p)
+        get {
+            switch self {
+            case .directory(let p):
+                return FS(p.appending(name))
+            case .error(.noSuchFileOrDirectory, let p):
+                return FS(p.appending(name))
+            case .error:
+                return self
+            case .file(let p), .symlink(let p), .fifo(let p), .socket(let p),
+                 .blockDevice(let p), .characterDevice(let p):
+                return .error(.notDirectory, p)
+            }
+        }
+        nonmutating set {
+            let target: FS = self[name]
+            // writeback from `dir["log"] += ...` arrives here as a
+            // self-assignment; the append already happened
+            guard target.path != newValue.path else { return }
+            guard let data = newValue.data else { return }
+            try? target.write(data)
         }
     }
 
@@ -190,13 +207,6 @@ private let EFTYPE_COMPAT = EFTYPE
 #else
 private let EFTYPE_COMPAT = EINVAL
 #endif
-
-extension FS: ExpressibleByStringLiteral {
-    /// `let node: FS = "/tmp"`
-    public init(stringLiteral value: String) {
-        self.init(value)
-    }
-}
 
 extension FS: CustomStringConvertible {
     public var description: String {
