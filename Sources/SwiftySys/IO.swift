@@ -105,6 +105,38 @@ public final class IO {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", command]
+        return try popen(process: process, mode)
+    }
+
+    /// Reads a command's stdout — `"cmd -opts |"` — but as an argv
+    /// list run directly, with no shell in between: Perl's safer
+    /// list-form `open($fh, "-|", @cmd)`. Arguments are passed
+    /// verbatim, so there is nothing to inject:
+    ///
+    /// ```swift
+    /// let io = try IO.readPipe(from: ["ls", "-la", userSuppliedPath])
+    /// ```
+    ///
+    /// `argv[0]` is resolved against `PATH` unless it contains a `/`.
+    public static func readPipe(from argv: [String]) throws -> IO {
+        try popen(argv: argv, .read)
+    }
+
+    /// Writes to a command's stdin — `"| cmd -opts"` — as an argv
+    /// list run directly, no shell: Perl's `open($fh, "|-", @cmd)`.
+    public static func writePipe(to argv: [String]) throws -> IO {
+        try popen(argv: argv, .write)
+    }
+
+    private static func popen(argv: [String], _ mode: Mode) throws -> IO {
+        guard let cmd = argv.first else { throw Errno.invalidArgument }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: try which(cmd))
+        process.arguments = Array(argv.dropFirst())
+        return try popen(process: process, mode)
+    }
+
+    private static func popen(process: Process, _ mode: Mode) throws -> IO {
         let pipe = Pipe()
         let handle: FileHandle
         switch mode {
@@ -120,6 +152,18 @@ public final class IO {
         try process.run()
         return IO(fd: FileDescriptor(rawValue: handle.fileDescriptor),
                   ownsFD: false, process: process, handle: handle)
+    }
+
+    /// execvp(3)-style PATH resolution. A name containing `/` is used
+    /// as-is; otherwise each PATH entry is tried for an executable.
+    private static func which(_ cmd: String) throws -> String {
+        if cmd.contains("/") { return cmd }
+        let path = getenv("PATH").map { String(cString: $0) } ?? "/usr/bin:/bin"
+        for dir in path.split(separator: ":", omittingEmptySubsequences: false) {
+            let candidate = (dir.isEmpty ? "." : String(dir)) + "/" + cmd
+            if access(candidate, X_OK) == 0 { return candidate }
+        }
+        throw Errno.noSuchFileOrDirectory
     }
 
     // MARK: - Standard streams

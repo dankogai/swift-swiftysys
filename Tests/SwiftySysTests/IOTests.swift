@@ -105,6 +105,57 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     }
 }
 
+@Suite struct ListPipes {
+    @Test func readPipe() throws {
+        let io = try IO.readPipe(from: ["echo", "hello"])
+        #expect(try io.readString() == "hello\n")
+        #expect(try io.close() == 0)
+    }
+
+    @Test func noShellInterpretation() throws {
+        // shell metacharacters arrive verbatim — nothing to inject
+        let evil = "$(whoami); rm -rf /tmp/x | `date` > out"
+        let io = try IO.readPipe(from: ["printf", "%s", evil])
+        #expect(try io.readString() == evil)
+        try io.close()
+    }
+
+    @Test func writePipe() throws {
+        try withTempDir { dir in
+            let path = dir.path.appending("sorted.txt")
+            // sort -o writes to a file, so no shell redirection is needed
+            let io = try IO.writePipe(to: ["sort", "-o", path.string])
+            try io.write("banana\napple\ncherry\n")
+            #expect(try io.close() == 0)
+            #expect(FS(path).string == "apple\nbanana\ncherry\n")
+        }
+    }
+
+    @Test func pathResolution() throws {
+        // "echo" above proved PATH lookup; a slash skips it
+        let io = try IO.readPipe(from: ["/bin/echo", "direct"])
+        #expect(try io.readString() == "direct\n")
+        try io.close()
+    }
+
+    @Test func exitStatus() throws {
+        let io = try IO.readPipe(from: ["false"])
+        #expect(try io.readAll().isEmpty)
+        #expect(try io.close() == 1)
+    }
+
+    @Test func missingCommandThrows() {
+        #expect(throws: Errno.noSuchFileOrDirectory) {
+            try IO.readPipe(from: ["no-such-command-xyzzy-\(UUID().uuidString)"])
+        }
+    }
+
+    @Test func emptyArgvThrows() {
+        #expect(throws: Errno.invalidArgument) { try IO.readPipe(from: []) }
+        #expect(throws: Errno.invalidArgument) { try IO.writePipe(to: []) }
+    }
+}
+
 @Suite struct Qx {
     @Test func capturesOutput() throws {
         #expect(try qx("echo hello") == "hello\n")

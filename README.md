@@ -127,7 +127,9 @@ primitives and Perl sugar on top:
 ```swift
 // explicit — use these when anything is not a literal
 IO.open(path, .read | .write | .append | .readWrite)
-IO.popen(command, .read | .write)      // via /bin/sh -c
+IO.popen(command, .read | .write)          // via /bin/sh -c
+IO.readPipe(from: ["ls", "-la", path])     // "cmd |"  — argv, NO shell
+IO.writePipe(to: ["sort", "-o", output])   // "| cmd"  — argv, NO shell
 
 // Perl-style 2-arg open — sugar for literals
 IO.open("< in.txt")        // read (the "<" is optional)
@@ -136,6 +138,11 @@ IO.open(">> log.txt")      // create/append
 IO.open("| sort -u")       // pipe: write to command's stdin
 IO.open("ls -la |")        // pipe: read command's stdout
 ```
+
+`readPipe(from:)` / `writePipe(to:)` are Perl's safer *list-form* open
+(`open $fh, "-|", @cmd` / `open $fh, "|-", @cmd`): the argv is executed
+directly — `argv[0]` resolved against `PATH`, execvp(3)-style — so
+arguments arrive verbatim and there is nothing to inject.
 
 Reading and writing: `read(_ count:)`, `readAll()`, `readString()`,
 `write(Data)`, `write(String)`. `close()` is idempotent; for pipes it
@@ -148,8 +155,9 @@ its stdout as a `String`.
 
 > **A word on the magic.** Interpolating untrusted strings into a 2-arg
 > open spec is the same injection Perl is famous for — that is *why*
-> Perl grew 3-arg open. The sugar is for literals; the explicit
-> primitives are right there for everything else.
+> Perl grew 3-arg open and the list-form pipe. The sugar is for
+> literals; `readPipe(from:)` / `writePipe(to:)` are right there for
+> everything else.
 
 ### The bridge
 
