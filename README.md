@@ -3,7 +3,7 @@
 [![CI via GitHub Actions](https://github.com/dankogai/swift-swiftysys/actions/workflows/swift.yml/badge.svg)](https://github.com/dankogai/swift-swiftysys/actions/workflows/swift.yml)
 
 System programming made Swifty — as easy as Perl, Python, or Ruby, yet
-swifty. Three pillars, Ruby's split with Perl's soul:
+swifty. Four pillars, Ruby's split with Perl's soul:
 
 - **`FS`** — the *namespace* view: filesystem nodes as a value-type enum,
   chainable without force-unwrapping, in the spirit of [SwiftyJSON].
@@ -13,6 +13,10 @@ swifty. Three pillars, Ruby's split with Perl's soul:
 - **`Sys`** — the *process* view: Python's `sys` plus the Perl core
   variables every script reaches for — `argv`, `env`, `exit`, `pid`,
   `platform`, `uname`, and friends.
+- **`HTTPS`** — the *secure web* view: REST verbs on chainable URLs.
+  Alone among the streams this kit speaks, HTTPS carries encryption
+  and CA verification — so it gets its own type, TLS-only by
+  construction.
 
 [SwiftyJSON]: https://github.com/SwiftyJSON/SwiftyJSON
 
@@ -53,6 +57,13 @@ try sink.write("a\nb\nc\n")
 try sink.close()                            // waits; exit status returned
 
 try qx("uname -a")                          // Perl's backticks
+
+// ---- HTTPS: the secure web ----
+try HTTPS("example.com").get().bodyString            // that's a GET
+try HTTPS("api.github.com")["users"]["dankogai"]     // chain paths, FS-style
+    .get().validate().bodyString
+try HTTPS("api.example").header("Authorization", "Bearer \(token)")
+    .post(#"{"answer": 42}"#)                        // REST verbs
 
 // ---- Sys: the process ----
 Sys.argv                                    // [String] — sys.argv / @ARGV
@@ -179,6 +190,8 @@ IO.open("> out.txt")       // create/truncate
 IO.open(">> log.txt")      // create/append
 IO.open("| sort -u")       // pipe: write to command's stdin
 IO.open("ls -la |")        // pipe: read command's stdout
+IO.open("https://example.com")    // URL: GET — read the body
+IO.open("| https://api.example")  // URL: POST what you write, on close()
 ```
 
 `readPipe(from:)` / `writePipe(to:)` are Perl's safer *list-form* open
@@ -228,6 +241,29 @@ its stdout as a `String`.
 > literals; `readPipe(from:)` / `writePipe(to:)` are right there for
 > everything else.
 
+### URLs — Ruby's open-uri
+
+`IO.open` takes URLs too, backed by Foundation's `URLSession`
+(synchronous by design — this is a scripting kit):
+
+```swift
+let page = try IO.open("https://example.com")        // GET, now
+try page.readString()                                 // the body
+page.terminationStatus                                // HTTP 200
+
+let post = try IO.open(URL(string: "https://api.example/submit")!,
+                       .write, method: "PUT", timeout: 30)
+try post.write(payload)
+try post.close()          // uploads here; returns the HTTP status
+```
+
+Reading fetches the body at `open` and serves it through a real
+descriptor, so every `IO` primitive works on it. Writing buffers and
+uploads at `close()` — `POST` unless `method` says otherwise. Non-2xx
+responses throw `IO.HTTPError` (with `status` and `body`); the HTTP
+status lands in `terminationStatus`, just as a pipe's exit status
+does. `file://` URLs read fine as well.
+
 ### The bridge
 
 `FS.open(_ mode:)` turns a node into a stream, and honors the ENOENT
@@ -266,6 +302,49 @@ Sys.env["DEBUG"] = "1"           // setenv — visible to children
 Sys.env.unset("DEBUG")           // unsetenv (assigning nil works too)
 for (key, value) in Sys.env { print("\(key)=\(value)") }
 ```
+
+## `HTTPS` — the secure web
+
+HTTP-with-TLS is the one protocol in this kit that carries encryption
+and certificate verification, so it gets a first-class type instead of
+hiding behind `IO.open`. The type's promise: **it is TLS-only**. A
+scheme-less spec becomes `https://`, an `http://` spec is upgraded,
+and there is deliberately no "skip verification" switch — URLSession's
+full certificate-chain validation always applies.
+
+```swift
+HTTPS("example.com")                          // https://example.com
+HTTPS("api.github.com")["users"]["dankogai"]  // chain paths, FS-style
+HTTPS("api.example")
+    .query("q", "swift")                      // ?q=swift
+    .header("Authorization", "Bearer \(t)")   // carried by every verb
+    .timeout(30)
+```
+
+Values are immutable and chainable; every builder returns a new
+`HTTPS`. Then the REST verbs — `get()`, `head()`, `post(_:)`,
+`put(_:)`, `patch(_:)`, `delete()`, or the general
+`request(_:body:headers:)` — perform the call synchronously and
+return a `Response`:
+
+```swift
+let r = try HTTPS("api.github.com")["users"]["dankogai"].get()
+r.status          // 200
+r.ok              // true for 2xx
+r.headers         // response headers
+r.bodyString      // the body (also `body: Data`)
+```
+
+Verbs return the `Response` even for non-2xx — REST scripts want to
+branch on status. When a bad status should throw, chain `validate()`:
+
+```swift
+try HTTPS("api.example")["missing"].get().validate()   // throws IO.HTTPError(404)
+```
+
+Transport failures (DNS, TLS, refused connections) always throw. And
+`open()` bridges to the other pillars — GET the body as an `IO`
+stream.
 
 ## Usage
 

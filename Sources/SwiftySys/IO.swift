@@ -30,8 +30,13 @@ public final class IO {
     private var process: Process?
     private var handle: FileHandle?     // keeps a pipe's fd alive
     public private(set) var isClosed = false
-    /// Exit status of the piped process, available after `close()`.
-    public private(set) var terminationStatus: Int32?
+    /// Exit status of the piped process — or, for URL streams, the
+    /// HTTP status — available after `close()`.
+    public internal(set) var terminationStatus: Int32?
+    /// Runs during `close()`, before the descriptor closes; its result
+    /// becomes `terminationStatus`. Used by URL-backed streams to
+    /// upload on close.
+    internal var finisher: (() throws -> Int32?)?
 
     internal init(fd: FileDescriptor, ownsFD: Bool,
                  process: Process? = nil, handle: FileHandle? = nil) {
@@ -75,6 +80,8 @@ public final class IO {
     /// try IO.open(">> log.txt")    // create/append
     /// try IO.open("| sort -u")     // pipe: write to command's stdin
     /// try IO.open("ls -la |")      // pipe: read command's stdout
+    /// try IO.open("https://example.com")     // GET — read the body
+    /// try IO.open("| https://api.example")   // POST on close()
     /// ```
     ///
     /// Sugar for literals only — interpolating untrusted strings into
@@ -85,7 +92,16 @@ public final class IO {
         func rest(_ n: Int) -> String {
             String(s.dropFirst(n)).trimmingCharacters(in: .whitespaces)
         }
-        if s.hasPrefix("|") { return try popen(rest(1), .write) }
+        func asURL(_ s: String) -> URL? {
+            guard s.hasPrefix("http://") || s.hasPrefix("https://") else { return nil }
+            return URL(string: s)
+        }
+        if let url = asURL(s) { return try open(url) }
+        if s.hasPrefix("|") {
+            let target = rest(1)
+            if let url = asURL(target) { return try open(url, .write) }
+            return try popen(target, .write)
+        }
         if s.hasSuffix("|") {
             let cmd = String(s.dropLast()).trimmingCharacters(in: .whitespaces)
             return try popen(cmd, .read)
@@ -225,6 +241,14 @@ public final class IO {
     public func close() throws -> Int32? {
         guard !isClosed else { return terminationStatus }
         isClosed = true
+        // the finisher needs the descriptor, so it runs first;
+        // its error is held so the fd still gets closed
+        var pendingError: Error?
+        if let finisher {
+            self.finisher = nil
+            do { terminationStatus = try finisher() }
+            catch { pendingError = error }
+        }
         if let handle {
             try handle.close()
         } else if ownsFD {
@@ -236,6 +260,7 @@ public final class IO {
             terminationStatus = process.terminationStatus
             self.process = nil
         }
+        if let pendingError { throw pendingError }
         return terminationStatus
     }
 }

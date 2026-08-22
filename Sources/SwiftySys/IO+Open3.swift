@@ -116,6 +116,12 @@ extension IO {
             let inFD = self.stdin.fd.rawValue
             let outFD = self.stdout.fd.rawValue
             let errFD = self.stderr.fd.rawValue
+            // POLLOUT does not promise room for a whole chunk, and a
+            // blocking write(2) larger than the free pipe space stalls
+            // until it ALL fits — while the child blocks writing output
+            // we are not draining: deadlock. Non-blocking writes take
+            // what fits and return; EAGAIN just means "poll again".
+            _ = fcntl(inFD, F_SETFL, fcntl(inFD, F_GETFL, 0) | O_NONBLOCK)
             var stdinOpen = true
             var stdoutOpen = true
             var stderrOpen = true
@@ -148,10 +154,18 @@ extension IO {
                         let n = pending.prefix(1 << 16).withUnsafeBytes {
                             posixWrite(inFD, $0.baseAddress, $0.count)
                         }
-                        if n > 0 { pending = pending.dropFirst(n) }
-                        if n <= 0 || pending.isEmpty {
-                            try? self.stdin.close()
-                            stdinOpen = false
+                        if n > 0 {
+                            pending = pending.dropFirst(n)
+                            if pending.isEmpty {
+                                try? self.stdin.close()
+                                stdinOpen = false
+                            }
+                        } else if n < 0 {
+                            let e = Errno(rawValue: errno)
+                            if e != .resourceTemporarilyUnavailable && e != .interrupted {
+                                try? self.stdin.close()   // EPIPE etc.
+                                stdinOpen = false
+                            }
                         }
                     case outFD, errFD:
                         // read even on POLLHUP — the buffer may still
