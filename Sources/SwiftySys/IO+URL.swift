@@ -46,10 +46,16 @@ extension IO {
     ///   uploads it when you `close()` (`POST` unless `method` says
     ///   otherwise); `close()` returns the HTTP status.
     ///
-    /// Works for `file://` URLs too (reading only).
+    /// `file://` URLs work in every mode — they bypass the network
+    /// stack and go straight to the file layer.
     public static func open(_ url: URL, _ mode: Mode = .read,
                             method: String? = nil,
                             timeout: TimeInterval? = nil) throws -> IO {
+        // file:// goes straight to the file layer — cheaper, and
+        // Linux's FoundationNetworking does not speak file URLs
+        if url.isFileURL {
+            return try open(FilePath(url.path(percentEncoded: false)), mode)
+        }
         switch mode {
         case .read:
             var request = URLRequest(url: url)

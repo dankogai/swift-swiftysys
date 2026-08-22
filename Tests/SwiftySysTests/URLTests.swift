@@ -88,11 +88,14 @@ private func withHTTPServer(
         }
     }
 
-    @Test func fileURLsRead() throws {
+    @Test func fileURLsBypassTheNetwork() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("swiftysys-url-\(UUID().uuidString).txt")
-        try "via file url\n".write(to: url, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
+        // writing works too — file URLs go straight to the file layer
+        let out = try IO.open(url, .write)
+        try out.write("via file url\n")
+        try out.close()
         let body = try IO.open(url).readString()
         #expect(body == "via file url\n")
     }

@@ -262,7 +262,8 @@ descriptor, so every `IO` primitive works on it. Writing buffers and
 uploads at `close()` — `POST` unless `method` says otherwise. Non-2xx
 responses throw `IO.HTTPError` (with `status` and `body`); the HTTP
 status lands in `terminationStatus`, just as a pipe's exit status
-does. `file://` URLs read fine as well.
+does. `file://` URLs work in every mode — they bypass the network
+stack entirely.
 
 ### The bridge
 
