@@ -1,21 +1,22 @@
 //
-//  IO+HTTPS.swift
+//  IO+Web.swift
 //  SwiftySys
 //
-//  The secure web as a first-class type, namespaced under IO so that
-//  other protocols can join it as siblings. Unlike every other stream
-//  this kit speaks, HTTPS carries encryption and CA verification —
-//  so it gets its own type instead of hiding behind IO.open:
+//  The web as first-class types, namespaced under IO so protocols
+//  live as siblings. One generic core, two faces:
 //
-//      try IO.HTTPS("example.com").get().bodyString
+//      try IO.HTTPS("example.com").get().bodyString        // TLS + CA
+//      try IO.HTTP("intranet.local:8080").get().bodyString // plaintext
 //      try IO.HTTPS("api.github.com")["users"]["dankogai"].get()
 //      try IO.HTTPS("api.example").header("Authorization", "Bearer \(t)")
 //          .post(json)
 //
-//  The type's promise: it is TLS-only. A scheme-less spec becomes
-//  https://, an http:// spec is upgraded, and there is deliberately
-//  no "skip verification" switch — URLSession's full certificate
-//  chain validation always applies.
+//  Each type is locked to its scheme — whatever scheme the spec
+//  carries is replaced by the type's own. IO.HTTPS is TLS-only:
+//  URLSession's full certificate-chain validation always applies,
+//  and there is deliberately no "skip verification" switch. Choosing
+//  plaintext is done by *typing* IO.HTTP — deprecated on the public
+//  internet, still the lingua franca of intranets.
 //
 //  REST verbs return a Response rather than throwing on non-2xx
 //  (REST scripts want to branch on status); call validate() when a
@@ -28,23 +29,62 @@ import FoundationNetworking
 #endif
 
 extension IO {
-    public struct HTTPS: Sendable {
+    /// A URL scheme a Web type is locked to.
+    public protocol WebScheme: Sendable {
+        static var scheme: String { get }
+    }
+
+    public enum HTTPScheme: WebScheme {
+        public static let scheme = "http"
+    }
+
+    public enum HTTPSScheme: WebScheme {
+        public static let scheme = "https"
+    }
+
+    /// Plaintext HTTP — for the intranet.
+    public typealias HTTP = Web<HTTPScheme>
+
+    /// HTTP over TLS with full CA verification — for everything else.
+    public typealias HTTPS = Web<HTTPSScheme>
+
+    /// What a verb returns. Shared by every scheme.
+    public struct WebResponse: Sendable {
+        public let status: Int
+        public let headers: [String: String]
+        public let body: Data
+        public var bodyString: String { String(decoding: body, as: UTF8.self) }
+        /// `true` for 2xx.
+        public var ok: Bool { (200..<300).contains(status) }
+        /// Throws `IO.HTTPError` unless `ok`. Chainable:
+        /// `try IO.HTTPS("api.example").get().validate().bodyString`
+        @discardableResult
+        public func validate() throws -> WebResponse {
+            guard ok else { throw IO.HTTPError(status: status, body: body) }
+            return self
+        }
+    }
+
+    public struct Web<Scheme: WebScheme>: Sendable {
+        public typealias Response = WebResponse
+
         private var components: URLComponents
         private var extraHeaders: [(String, String)] = []
         private var timeoutInterval: TimeInterval?
 
-        /// `IO.HTTPS("example.com")`, `IO.HTTPS("example.com:8443/api?x=1")`,
-        /// or a full URL. Any scheme is replaced with `https`.
+        /// `IO.HTTPS("example.com")`, `IO.HTTP("host:8080/api?x=1")`,
+        /// or a full URL. Any scheme in the spec is replaced by the
+        /// type's own.
         public init(_ spec: String) {
             var s = spec
             if let range = s.range(of: "://") {
                 s = String(s[range.upperBound...])
             }
-            if let parsed = URLComponents(string: "https://" + s) {
+            if let parsed = URLComponents(string: Scheme.scheme + "://" + s) {
                 components = parsed
             } else {
                 components = URLComponents()
-                components.scheme = "https"
+                components.scheme = Scheme.scheme
             }
         }
 
@@ -55,7 +95,7 @@ extension IO {
 
         /// Appends a path segment (percent-encoded as needed), FS-style:
         /// `IO.HTTPS("api.github.com")["users"]["dankogai"]`.
-        public subscript(_ segment: String) -> HTTPS {
+        public subscript(_ segment: String) -> Web {
             var next = self
             for piece in segment.split(separator: "/") {
                 next.components.path += "/" + piece
@@ -64,12 +104,12 @@ extension IO {
         }
 
         /// Same as the subscript: `IO.HTTPS("api.github.com") / "users"`.
-        public static func / (lhs: HTTPS, rhs: String) -> HTTPS {
+        public static func / (lhs: Web, rhs: String) -> Web {
             lhs[rhs]
         }
 
         /// Adds one query item, preserving order.
-        public func query(_ name: String, _ value: String) -> HTTPS {
+        public func query(_ name: String, _ value: String) -> Web {
             var next = self
             next.components.queryItems =
                 (next.components.queryItems ?? []) + [URLQueryItem(name: name, value: value)]
@@ -77,7 +117,7 @@ extension IO {
         }
 
         /// Adds query items (sorted by name, for deterministic URLs).
-        public func query(_ items: [String: String]) -> HTTPS {
+        public func query(_ items: [String: String]) -> Web {
             var next = self
             for key in items.keys.sorted() {
                 next = next.query(key, items[key]!)
@@ -86,14 +126,14 @@ extension IO {
         }
 
         /// Adds a request header carried by every verb on this value.
-        public func header(_ name: String, _ value: String) -> HTTPS {
+        public func header(_ name: String, _ value: String) -> Web {
             var next = self
             next.extraHeaders.append((name, value))
             return next
         }
 
         /// Sets the request timeout carried by every verb on this value.
-        public func timeout(_ seconds: TimeInterval) -> HTTPS {
+        public func timeout(_ seconds: TimeInterval) -> Web {
             var next = self
             next.timeoutInterval = seconds
             return next
@@ -164,29 +204,11 @@ extension IO {
         public func open() throws -> IO {
             try IO.buffered(get().validate().body)
         }
-
-        // MARK: - Response
-
-        public struct Response: Sendable {
-            public let status: Int
-            public let headers: [String: String]
-            public let body: Data
-            public var bodyString: String { String(decoding: body, as: UTF8.self) }
-            /// `true` for 2xx.
-            public var ok: Bool { (200..<300).contains(status) }
-            /// Throws `IO.HTTPError` unless `ok`. Chainable:
-            /// `try IO.HTTPS("api.example").get().validate().bodyString`
-            @discardableResult
-            public func validate() throws -> Response {
-                guard ok else { throw IO.HTTPError(status: status, body: body) }
-                return self
-            }
-        }
     }
 }
 
-extension IO.HTTPS: CustomStringConvertible {
+extension IO.Web: CustomStringConvertible {
     public var description: String {
-        "IO.HTTPS(\(url?.absoluteString ?? "invalid"))"
+        "IO.\(Scheme.scheme.uppercased())(\(url?.absoluteString ?? "invalid"))"
     }
 }

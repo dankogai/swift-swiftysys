@@ -106,3 +106,49 @@ private func withHTTPServer(
         }
     }
 }
+
+@Suite(.serialized) struct PlainHTTP {
+    @Test func schemeIsLockedToHTTP() {
+        #expect(IO.HTTP("intranet.local:8080").url?.absoluteString
+                == "http://intranet.local:8080")
+        // the type's scheme always wins — choosing plaintext is
+        // done by typing IO.HTTP, never by a spec string
+        #expect(IO.HTTP("https://example.com").url?.scheme == "http")
+        #expect(IO.HTTPS("http://example.com").url?.scheme == "https")
+    }
+
+    @Test func buildersWorkAcrossSchemes() {
+        let u = IO.HTTP("host")["api"]["v1"].query("q", "x").url
+        #expect(u?.absoluteString == "http://host/api/v1?q=x")
+        #expect("\(IO.HTTP("host"))" == "IO.HTTP(http://host)")
+        #expect("\(IO.HTTPS("host"))" == "IO.HTTPS(https://host)")
+    }
+
+    @Test func restVerbsOverRealHTTP() throws {
+        // unlike HTTPS, plaintext HTTP is end-to-end testable locally
+        try withHTTPServer(requests: 2) { base, server in
+            let host = String(base.dropFirst("http://".count))
+            let ok = try IO.HTTP(host).timeout(15).get()
+            #expect(ok.status == 200)
+            #expect(ok.bodyString == "hello from http\n")
+            let posted = try IO.HTTP(host)["submit"]
+                .timeout(15).post("intranet payload")
+            #expect(posted.ok)
+            let echoed = try server.readString()
+            #expect(echoed.contains("BODY:intranet payload"))
+        }
+    }
+
+    @Test func validateWorksOverHTTP() throws {
+        try withHTTPServer(requests: 1) { base, _ in
+            let host = String(base.dropFirst("http://".count))
+            let response = try IO.HTTP(host)["missing"].timeout(15).get()
+            #expect(response.status == 404)
+            #expect {
+                try response.validate()
+            } throws: { error in
+                (error as? IO.HTTPError)?.status == 404
+            }
+        }
+    }
+}

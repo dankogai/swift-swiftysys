@@ -13,11 +13,11 @@ swifty. Four pillars, Ruby's split with Perl's soul:
 - **`Sys`** — the *process* view: Python's `sys` plus the Perl core
   variables every script reaches for — `argv`, `env`, `exit`, `pid`,
   `platform`, `uname`, and friends.
-- **`IO.HTTPS`** — the *secure web* view: REST verbs on chainable URLs.
-  Alone among the streams this kit speaks, HTTPS carries encryption
-  and CA verification — so it gets its own type, TLS-only by
-  construction, namespaced under `IO` so future protocols can join it
-  as siblings.
+- **`IO.HTTPS`** (and **`IO.HTTP`**) — the *web* view: REST verbs on
+  chainable URLs. HTTPS carries encryption and CA verification — so it
+  gets its own type, TLS-only by construction, namespaced under `IO`
+  so protocols live as siblings. `IO.HTTP` is its plaintext sibling
+  for the intranet.
 
 [SwiftyJSON]: https://github.com/SwiftyJSON/SwiftyJSON
 
@@ -71,6 +71,7 @@ try IO.HTTPS("api.github.com")["users"]["dankogai"]     // chain paths, FS-style
     .get().validate().bodyString
 try IO.HTTPS("api.example").header("Authorization", "Bearer \(token)")
     .post(#"{"answer": 42}"#)                        // REST verbs
+try IO.HTTP("intranet.local:8080").get()             // plaintext, by type choice
 
 // ---- Sys: the process ----
 Sys.argv                                    // [String] — sys.argv / @ARGV
@@ -339,16 +340,21 @@ the source in `FS(...)` to say you mean a file. One parsing note:
 the `>>`-family binds tighter than `+`, so build target paths into a
 variable rather than concatenating inline.
 
-## `IO.HTTPS` — the secure web
+## `IO.HTTPS` / `IO.HTTP` — the web
 
 HTTP-with-TLS is the one protocol in this kit that carries encryption
 and certificate verification, so it gets a first-class type instead of
-hiding behind `IO.open` — namespaced under `IO`, where future
-protocols can join it as siblings. The type's promise: **it is
-TLS-only**. A
-scheme-less spec becomes `https://`, an `http://` spec is upgraded,
-and there is deliberately no "skip verification" switch — URLSession's
-full certificate-chain validation always applies.
+hiding behind `IO.open` — namespaced under `IO`, where protocols live
+as siblings. `IO.HTTPS`'s promise: **it is TLS-only**. Whatever scheme
+the spec carries is replaced by the type's own, and there is
+deliberately no "skip verification" switch — URLSession's full
+certificate-chain validation always applies.
+
+`IO.HTTP` is the plaintext sibling — deprecated on the public
+internet, still the lingua franca of intranets. Same builders, same
+verbs, same `Response`; the *only* way to speak plaintext is to type
+`IO.HTTP`, never a spec string (`IO.HTTPS("http://x")` upgrades, and
+`IO.HTTP("https://x")` stays plaintext — the type always wins).
 
 ```swift
 IO.HTTPS("example.com")                          // https://example.com

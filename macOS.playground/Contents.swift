@@ -168,6 +168,10 @@ resp?.ok
 resp?.bodyString.prefix(80)
 //: Non-2xx doesn't throw (branch on .status); validate() when it should:
 //: `try IO.HTTPS("api.example")["missing"].get().validate()` → HTTPError(404)
+//: And IO.HTTP is the plaintext sibling for intranets — same builders,
+//: same verbs; the scheme is chosen by the TYPE, never a spec string:
+IO.HTTP("intranet.local:8080")["api"]["v1"]       // http://intranet.local:8080/api/v1
+IO.HTTP("https://example.com").url                // stays http — the type wins
 
 //: ## Sys — the process view (Python's sys, Perl's core variables)
 Sys.argv                                 // @ARGV, argv[0] included
