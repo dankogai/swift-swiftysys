@@ -8,7 +8,7 @@ swifty. Four pillars, Ruby's split with Perl's soul:
 - **`FS`** — the *namespace* view: filesystem nodes as a value-type enum,
   chainable without force-unwrapping, in the spirit of [SwiftyJSON].
 - **`IO`** — the *stream* view: open file descriptors as reference types —
-  files, pipes to processes (Perl's 2-arg `open`, `qx()`, and
+  files, pipes to processes (Perl's 2-arg `open`, `IO.qx()`, and
   `IPC::Open3` included), and, on the roadmap, sockets.
 - **`Sys`** — the *process* view: Python's `sys` plus the Perl core
   variables every script reaches for — `argv`, `env`, `exit`, `pid`,
@@ -57,7 +57,7 @@ let sink = try IO.open("| wc -l")           // write to a command
 try sink.write("a\nb\nc\n")
 try sink.close()                            // waits; exit status returned
 
-try qx("uname -a")                          // Perl's backticks
+try IO.qx("uname -a")                          // Perl's backticks
 
 // ---- redirection operators, noclobber manners ----
 try FS("draft.txt") > "final.txt"           // write; throws if target exists
@@ -239,7 +239,7 @@ waits for the process and returns the exit status (also kept in
 `terminationStatus`) — Perl's `close` setting `$?`. `IO.stdin` /
 `.stdout` / `.stderr` wrap the standard descriptors.
 
-`qx(_:)` is the backtick: runs a command through the shell and returns
+`IO.qx(_:)` is the backtick: runs a command through the shell and returns
 its stdout as a `String`.
 
 > **A word on the magic.** Interpolating untrusted strings into a 2-arg
@@ -405,7 +405,7 @@ swift run --repl
 ```swift
 import SwiftySys
 FS.home[".zshrc"].string
-try qx("uptime")
+try IO.qx("uptime")
 ```
 
 ## Roadmap

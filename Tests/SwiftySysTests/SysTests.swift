@@ -58,7 +58,7 @@ import Foundation
         Sys.env[name] = "42"
         #expect(Sys.env[name] == "42")
         // visible to children, as a real env var should be
-        #expect((try? qx("printf '%s' \"$\(name)\"")) == "42")
+        #expect((try? IO.qx("printf '%s' \"$\(name)\"")) == "42")
         Sys.env.unset(name)
         #expect(Sys.env[name] == nil)
     }

@@ -99,8 +99,8 @@ try sorted.readString()                  // "1\n2\n3\n"
 try sorted.close()
 
 //: Perl's backticks:
-try qx("uname -a")
-try qx("date")
+try IO.qx("uname -a")
+try IO.qx("date")
 
 //: ## The safer list form — argv straight through, NO shell
 //: (Perl's `open $fh, "-|", @cmd` — nothing to inject.)
@@ -182,7 +182,7 @@ Sys.byteOrder
 //: The environment is a dictionary — %ENV:
 Sys.env["HOME"]
 Sys.env["SWIFTYSYS"] = "playground"      // setenv — children see it
-try qx("printf '%s' \"$SWIFTYSYS\"")     // proof
+try IO.qx("printf '%s' \"$SWIFTYSYS\"")     // proof
 Sys.env.unset("SWIFTYSYS")
 
 //: ## FS meets IO

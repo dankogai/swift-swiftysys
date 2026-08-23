@@ -224,13 +224,13 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 
 @Suite struct Qx {
     @Test func capturesOutput() throws {
-        #expect(try qx("echo hello") == "hello\n")
-        #expect(try qx("printf '%s' 'no newline'") == "no newline")
+        #expect(try IO.qx("echo hello") == "hello\n")
+        #expect(try IO.qx("printf '%s' 'no newline'") == "no newline")
     }
 
     @Test func shellFeaturesWork() throws {
         // pipes and env, like Perl's backticks
-        #expect(try qx("echo FOO | tr A-Z a-z") == "foo\n")
+        #expect(try IO.qx("echo FOO | tr A-Z a-z") == "foo\n")
     }
 }
 

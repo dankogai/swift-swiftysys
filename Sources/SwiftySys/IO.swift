@@ -267,14 +267,16 @@ public final class IO {
 
 // MARK: - qx()
 
-/// Perl's `qx()` / backticks: runs `command` through the shell and
-/// returns its stdout. The exit status is not checked, just like Perl;
-/// use `IO.popen` + `close()` if you need it.
-public func qx(_ command: String) throws -> String {
-    let io = try IO.popen(command, .read)
-    let out = try io.readString()
-    try io.close()
-    return out
+extension IO {
+    /// Perl's `qx()` / backticks: runs `command` through the shell and
+    /// returns its stdout. The exit status is not checked, just like
+    /// Perl; use `IO.popen` + `close()` if you need it.
+    public static func qx(_ command: String) throws -> String {
+        let io = try popen(command, .read)
+        let out = try io.readString()
+        try io.close()
+        return out
+    }
 }
 
 // MARK: - FS ↔ IO bridge
