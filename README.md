@@ -13,10 +13,11 @@ swifty. Four pillars, Ruby's split with Perl's soul:
 - **`Sys`** — the *process* view: Python's `sys` plus the Perl core
   variables every script reaches for — `argv`, `env`, `exit`, `pid`,
   `platform`, `uname`, and friends.
-- **`HTTPS`** — the *secure web* view: REST verbs on chainable URLs.
+- **`IO.HTTPS`** — the *secure web* view: REST verbs on chainable URLs.
   Alone among the streams this kit speaks, HTTPS carries encryption
   and CA verification — so it gets its own type, TLS-only by
-  construction.
+  construction, namespaced under `IO` so future protocols can join it
+  as siblings.
 
 [SwiftyJSON]: https://github.com/SwiftyJSON/SwiftyJSON
 
@@ -59,10 +60,10 @@ try sink.close()                            // waits; exit status returned
 try qx("uname -a")                          // Perl's backticks
 
 // ---- HTTPS: the secure web ----
-try HTTPS("example.com").get().bodyString            // that's a GET
-try HTTPS("api.github.com")["users"]["dankogai"]     // chain paths, FS-style
+try IO.HTTPS("example.com").get().bodyString            // that's a GET
+try IO.HTTPS("api.github.com")["users"]["dankogai"]     // chain paths, FS-style
     .get().validate().bodyString
-try HTTPS("api.example").header("Authorization", "Bearer \(token)")
+try IO.HTTPS("api.example").header("Authorization", "Bearer \(token)")
     .post(#"{"answer": 42}"#)                        // REST verbs
 
 // ---- Sys: the process ----
@@ -304,19 +305,21 @@ Sys.env.unset("DEBUG")           // unsetenv (assigning nil works too)
 for (key, value) in Sys.env { print("\(key)=\(value)") }
 ```
 
-## `HTTPS` — the secure web
+## `IO.HTTPS` — the secure web
 
 HTTP-with-TLS is the one protocol in this kit that carries encryption
 and certificate verification, so it gets a first-class type instead of
-hiding behind `IO.open`. The type's promise: **it is TLS-only**. A
+hiding behind `IO.open` — namespaced under `IO`, where future
+protocols can join it as siblings. The type's promise: **it is
+TLS-only**. A
 scheme-less spec becomes `https://`, an `http://` spec is upgraded,
 and there is deliberately no "skip verification" switch — URLSession's
 full certificate-chain validation always applies.
 
 ```swift
-HTTPS("example.com")                          // https://example.com
-HTTPS("api.github.com")["users"]["dankogai"]  // chain paths, FS-style
-HTTPS("api.example")
+IO.HTTPS("example.com")                          // https://example.com
+IO.HTTPS("api.github.com")["users"]["dankogai"]  // chain paths, FS-style
+IO.HTTPS("api.example")
     .query("q", "swift")                      // ?q=swift
     .header("Authorization", "Bearer \(t)")   // carried by every verb
     .timeout(30)
@@ -329,7 +332,7 @@ Values are immutable and chainable; every builder returns a new
 return a `Response`:
 
 ```swift
-let r = try HTTPS("api.github.com")["users"]["dankogai"].get()
+let r = try IO.HTTPS("api.github.com")["users"]["dankogai"].get()
 r.status          // 200
 r.ok              // true for 2xx
 r.headers         // response headers
@@ -340,7 +343,7 @@ Verbs return the `Response` even for non-2xx — REST scripts want to
 branch on status. When a bad status should throw, chain `validate()`:
 
 ```swift
-try HTTPS("api.example")["missing"].get().validate()   // throws IO.HTTPError(404)
+try IO.HTTPS("api.example")["missing"].get().validate()   // throws IO.HTTPError(404)
 ```
 
 Transport failures (DNS, TLS, refused connections) always throw. And

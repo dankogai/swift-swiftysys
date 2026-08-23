@@ -144,15 +144,15 @@ page?.prefix(80)
 //: ## HTTPS — the secure web, first-class
 //: TLS-only by construction: schemes are forced to https, and CA
 //: verification always applies. Paths chain like FS, verbs are REST:
-HTTPS("api.github.com")["users"]["dankogai"]   // builds the URL
-HTTPS("example.com").query("q", "swift sys")   // ?q=swift%20sys
-HTTPS("http://example.com")                    // upgraded to https!
-let resp = try? HTTPS("www.example.com").timeout(15).get()
+IO.HTTPS("api.github.com")["users"]["dankogai"]   // builds the URL
+IO.HTTPS("example.com").query("q", "swift sys")   // ?q=swift%20sys
+IO.HTTPS("http://example.com")                    // upgraded to https!
+let resp = try? IO.HTTPS("www.example.com").timeout(15).get()
 resp?.status                                   // 200
 resp?.ok
 resp?.bodyString.prefix(80)
 //: Non-2xx doesn't throw (branch on .status); validate() when it should:
-//: `try HTTPS("api.example")["missing"].get().validate()` → HTTPError(404)
+//: `try IO.HTTPS("api.example")["missing"].get().validate()` → HTTPError(404)
 
 //: ## Sys — the process view (Python's sys, Perl's core variables)
 Sys.argv                                 // @ARGV, argv[0] included
