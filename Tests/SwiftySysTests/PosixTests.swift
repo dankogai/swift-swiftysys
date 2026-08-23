@@ -51,6 +51,75 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     }
 }
 
+@Suite struct SymbolicChmod {
+    // the pure parser, with umask and directory-ness explicit
+    private func mode(_ spec: String, on current: CInterop.Mode,
+                      dir: Bool = false, umask: CInterop.Mode = 0) throws -> CInterop.Mode {
+        try FS.symbolicMode(spec, applyingTo: current, isDirectory: dir, umask: umask)
+    }
+
+    @Test func plusAndMinus() throws {
+        #expect(try mode("u+x", on: 0o644) == 0o744)
+        #expect(try mode("go-w", on: 0o666) == 0o644)
+        #expect(try mode("u+x-w", on: 0o644) == 0o544)   // ops chain in a clause
+        #expect(try mode("a+w", on: 0o444) == 0o666)
+    }
+
+    @Test func equalsSetsExactly() throws {
+        #expect(try mode("u=rwx,go=rx", on: 0o000) == 0o755)
+        #expect(try mode("u=", on: 0o755) == 0o055)      // empty = clears
+        #expect(try mode("a=r", on: 0o777) == 0o444)
+        #expect(try mode("u=rwx", on: 0o4644) == 0o744)  // = clears setuid too
+    }
+
+    @Test func capitalXIsConditional() throws {
+        #expect(try mode("a+X", on: 0o644) == 0o644)          // plain file: no
+        #expect(try mode("a+X", on: 0o644, dir: true) == 0o755)  // dir: yes
+        #expect(try mode("a+X", on: 0o744) == 0o755)          // already-x: yes
+    }
+
+    @Test func permcopy() throws {
+        #expect(try mode("g=u", on: 0o750) == 0o770)
+        #expect(try mode("go=u", on: 0o700) == 0o777)
+    }
+
+    @Test func setuidSetgidSticky() throws {
+        #expect(try mode("u+s", on: 0o755) == 0o4755)
+        #expect(try mode("g+s", on: 0o755) == 0o2755)
+        #expect(try mode("+t", on: 0o777) == 0o1777)
+        #expect(try mode("u-s", on: 0o4755) == 0o755)
+    }
+
+    @Test func omittedWhoHonorsUmask() throws {
+        #expect(try mode("+w", on: 0o444, umask: 0o022) == 0o644)
+        #expect(try mode("=rwx", on: 0o400, umask: 0o022) == 0o755)
+        // explicit who ignores the umask
+        #expect(try mode("a+w", on: 0o444, umask: 0o022) == 0o666)
+    }
+
+    @Test func malformedSpecsThrow() {
+        for bad in ["z+x", "u~x", "ux", "", "u+q", "u+x,,g+x"] {
+            #expect(throws: Errno.invalidArgument, "\(bad)") {
+                try FS.symbolicMode(bad, applyingTo: 0o644,
+                                    isDirectory: false, umask: 0)
+            }
+        }
+    }
+
+    @Test func appliesToRealFiles() throws {
+        try withTempDir { dir in
+            let file = try dir["f.sh"].write("#!/bin/sh\n")
+            try file.chmod(0o644)
+            try file.chmod("u+x")
+            #expect(file.mode.map { $0 & 0o7777 } == 0o744)
+            try file.chmod("a=rwX")       // has u+x, so X applies
+            #expect(file.mode.map { $0 & 0o7777 } == 0o777)
+            try file.chmod("u=rw,go=r")
+            #expect(file.mode.map { $0 & 0o7777 } == 0o644)
+        }
+    }
+}
+
 @Suite struct RenameLink {
     @Test func renameMoves() throws {
         try withTempDir { dir in

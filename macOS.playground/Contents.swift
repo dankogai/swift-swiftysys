@@ -85,6 +85,11 @@ demo["a"]["b"]["c"].isDirectory
 //: ## The classic POSIX calls, house style
 try demo["hello.txt"].chmod(0o600)
 demo["hello.txt"].permissions
+//: chmod also speaks chmod(1)'s symbolic modes:
+try demo["hello.txt"].chmod("u+x")       // 0o700
+try demo["hello.txt"].chmod("a=rwX")     // 0o777 — u had x, so X applies
+try demo["hello.txt"].chmod("u=rw,go=r") // back to 0o644
+demo["hello.txt"].permissions
 try demo["hello.txt"].chown(user: Sys.user)  // to ourselves — allowed
 let renamed = try demo["hello.txt"].rename(to: demo.pathString + "/renamed.txt")
 let mirror = try renamed.link(to: demo.pathString + "/mirror.txt")

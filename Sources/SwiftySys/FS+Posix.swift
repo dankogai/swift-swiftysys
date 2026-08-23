@@ -114,6 +114,119 @@ extension FS {
         try syscall { p in p.withPlatformString { C.chmod($0, mode) } }
     }
 
+    /// chmod(1)'s symbolic modes, BSD-style:
+    ///
+    /// ```swift
+    /// try FS("script.sh").chmod("u+x")
+    /// try FS("shared").chmod("a=rwX")       // X: only dirs & already-x
+    /// try FS("f").chmod("u=rwx,go=rx")      // clauses compose
+    /// try FS("f").chmod("g=u")              // copy u's bits to g
+    /// ```
+    ///
+    /// The full grammar: who `u`/`g`/`o`/`a` (omitted = `a`, honoring
+    /// the umask), ops `+`/`-`/`=`, perms `r`/`w`/`x`/`X`/`s`/`t` or a
+    /// single `u`/`g`/`o` to copy. Malformed specs throw `EINVAL`.
+    @discardableResult
+    public func chmod(_ symbolic: String) throws -> FS {
+        guard let st = stat else {
+            if case .error(let e, _) = self { throw e }
+            throw Errno.noSuchFileOrDirectory
+        }
+        // read the umask without changing it (set-and-restore)
+        let mask = C.umask(0)
+        _ = C.umask(mask)
+        let newMode = try FS.symbolicMode(
+            symbolic,
+            applyingTo: st.st_mode & 0o7777,
+            isDirectory: resolved().isDirectory,
+            umask: mask
+        )
+        return try chmod(newMode)
+    }
+
+    /// The pure heart of symbolic chmod — split out so it is testable
+    /// with an explicit umask and directory-ness.
+    internal static func symbolicMode(
+        _ spec: String,
+        applyingTo current: CInterop.Mode,
+        isDirectory: Bool,
+        umask: CInterop.Mode
+    ) throws -> CInterop.Mode {
+        func position(_ who: Character) -> CInterop.Mode {
+            switch who {
+            case "u": 6
+            case "g": 3
+            default: 0
+            }
+        }
+        var mode = current & 0o7777
+        for clause in spec.split(separator: ",", omittingEmptySubsequences: false) {
+            let chars = Array(clause)
+            var i = 0
+            var whos: Set<Character> = []
+            while i < chars.count, "ugoa".contains(chars[i]) {
+                if chars[i] == "a" { whos.formUnion("ugo") } else { whos.insert(chars[i]) }
+                i += 1
+            }
+            let whoOmitted = whos.isEmpty
+            if whoOmitted { whos = ["u", "g", "o"] }
+            guard i < chars.count else { throw Errno.invalidArgument }
+            while i < chars.count {
+                let op = chars[i]
+                guard "+-=".contains(op) else { throw Errno.invalidArgument }
+                i += 1
+                var perms: [Character] = []
+                while i < chars.count, !"+-=".contains(chars[i]) {
+                    perms.append(chars[i])
+                    i += 1
+                }
+                var bits: CInterop.Mode = 0
+                if perms.count == 1, "ugo".contains(perms[0]) {
+                    // permcopy: replicate the source's rwx to the whos
+                    let source = (mode >> position(perms[0])) & 0o7
+                    for who in whos { bits |= source << position(who) }
+                } else {
+                    for perm in perms {
+                        switch perm {
+                        case "r": for who in whos { bits |= 0o4 << position(who) }
+                        case "w": for who in whos { bits |= 0o2 << position(who) }
+                        case "x": for who in whos { bits |= 0o1 << position(who) }
+                        case "X":
+                            if isDirectory || (mode & 0o111) != 0 {
+                                for who in whos { bits |= 0o1 << position(who) }
+                            }
+                        case "s":
+                            if whos.contains("u") { bits |= 0o4000 }
+                            if whos.contains("g") { bits |= 0o2000 }
+                        case "t":
+                            bits |= 0o1000
+                        default:
+                            throw Errno.invalidArgument
+                        }
+                    }
+                }
+                if whoOmitted { bits &= ~umask }
+                switch op {
+                case "+":
+                    mode |= bits
+                case "-":
+                    mode &= ~bits
+                default:  // "="
+                    var cleared: CInterop.Mode = 0
+                    for who in whos {
+                        switch who {
+                        case "u": cleared |= 0o4700
+                        case "g": cleared |= 0o2070
+                        default:  cleared |= 0o1007
+                        }
+                    }
+                    mode = (mode & ~cleared) | bits
+                }
+            }
+        }
+        return mode
+    }
+
     // MARK: - chown
 
     /// Changes owner and/or group by id — `chown(2)` (follows

@@ -156,6 +156,9 @@ The classic POSIX manipulation calls follow the same shape:
 
 ```swift
 try FS("script.sh").chmod(0o755)          // or chmod([.ownerReadWrite])
+try FS("script.sh").chmod("u+x")          // or chmod(1)'s symbolic modes:
+try FS("shared").chmod("a=rwX")           // who ugoa, ops +-=, perms rwxXst,
+try FS("f").chmod("u=rwx,go=rx")          // permcopy ("g=u"), clauses compose
 try FS("data.log").chown(user: "dankogai")  // or chown(uid:gid:), by id
 try FS("draft.txt").rename(to: "final.txt")
 try FS("original").link(to: "mirror")     // hard link — link(2)
