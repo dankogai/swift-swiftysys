@@ -55,6 +55,41 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
             #expect(throws: Errno.badFileDescriptor) { try io.write("x") }
         }
     }
+
+    @Test func modesCompose() throws {
+        try withTempDir { dir in
+            let path = dir.path.appending("rw.txt")
+            try IO.open(path, .write).write("0123456789")
+            // [.read, .write] opens without truncating...
+            let rw = try IO.open(path, [.read, .write])
+            #expect(try rw.read(4) == Data("0123".utf8))
+            try rw.close()
+            #expect(FS(path).size == 10)
+            // ...while .write alone truncates
+            try IO.open(path, .write).close()
+            #expect(FS(path).size == 0)
+            // [.read, .append]: writes land at the end, reads work
+            try IO.open(path, .write).write("head-")
+            let ra = try IO.open(path, [.read, .append])
+            try ra.write("tail")
+            try ra.close()
+            #expect(FS(path).string == "head-tail")
+        }
+    }
+
+    @Test func modeAlgebra() {
+        #expect(IO.Mode.readWrite == [.read, .write])
+        #expect(IO.Mode.readWrite.contains(.read))
+        #expect(!IO.Mode.append.contains(.write))   // append implies write in effect, not in bits
+    }
+
+    @Test func emptyModeThrows() throws {
+        try withTempDir { dir in
+            #expect(throws: Errno.invalidArgument) {
+                try IO.open(dir.path.appending("x.txt"), [])
+            }
+        }
+    }
 }
 
 @Suite struct MagicOpen {

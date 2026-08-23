@@ -21,8 +21,23 @@ import Glibc
 #endif
 
 public final class IO {
-    public enum Mode: Sendable {
-        case read, write, append, readWrite
+    /// What to open a stream for — an OptionSet, so modes compose:
+    ///
+    /// - `.read` — read only
+    /// - `.write` — write only; creates, truncates
+    /// - `.append` — write at the end; creates (write is implied)
+    /// - `[.read, .write]` — both; creates, does NOT truncate
+    ///   (also spelled `.readWrite`)
+    /// - `[.read, .append]` — read anywhere, write at the end
+    public struct Mode: OptionSet, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+
+        public static let read   = Mode(rawValue: 1 << 0)
+        public static let write  = Mode(rawValue: 1 << 1)
+        public static let append = Mode(rawValue: 1 << 2)
+        /// `[.read, .write]`, spelled the classic way.
+        public static let readWrite: Mode = [.read, .write]
     }
 
     internal let fd: FileDescriptor
@@ -52,22 +67,26 @@ public final class IO {
 
     // MARK: - Opening files
 
-    /// Opens a file. `.write` creates/truncates, `.append` creates/appends.
+    /// Opens a file. `.write` creates/truncates, `.append` creates/appends,
+    /// and modes compose: `[.read, .write]`, `[.read, .append]`.
     public static func open(_ path: FilePath, _ mode: Mode = .read) throws -> IO {
         let perms: FilePermissions = [.ownerReadWrite, .groupRead, .otherRead]
+        let wantsRead = mode.contains(.read)
+        let wantsWrite = mode.contains(.write) || mode.contains(.append)
         let fd: FileDescriptor
-        switch mode {
-        case .read:
+        switch (wantsRead, wantsWrite) {
+        case (true, false):
             fd = try .open(path, .readOnly)
-        case .write:
-            fd = try .open(path, .writeOnly,
-                           options: [.create, .truncate], permissions: perms)
-        case .append:
-            fd = try .open(path, .writeOnly,
-                           options: [.create, .append], permissions: perms)
-        case .readWrite:
-            fd = try .open(path, .readWrite,
-                           options: [.create], permissions: perms)
+        case (false, true):
+            let options: FileDescriptor.OpenOptions =
+                mode.contains(.append) ? [.create, .append] : [.create, .truncate]
+            fd = try .open(path, .writeOnly, options: options, permissions: perms)
+        case (true, true):
+            let options: FileDescriptor.OpenOptions =
+                mode.contains(.append) ? [.create, .append] : [.create]
+            fd = try .open(path, .readWrite, options: options, permissions: perms)
+        case (false, false):
+            throw Errno.invalidArgument
         }
         return IO(fd: fd, ownsFD: true)
     }
@@ -162,8 +181,8 @@ public final class IO {
         case .write:
             process.standardInput = pipe
             handle = pipe.fileHandleForWriting
-        case .append, .readWrite:
-            throw Errno.invalidArgument
+        default:
+            throw Errno.invalidArgument     // pipes are one-way
         }
         try process.run()
         return IO(fd: FileDescriptor(rawValue: handle.fileDescriptor),

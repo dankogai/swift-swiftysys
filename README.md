@@ -186,8 +186,10 @@ primitives and Perl sugar on top:
 
 ```swift
 // explicit — use these when anything is not a literal
-IO.open(path, .read | .write | .append | .readWrite)
-IO.popen(command, .read | .write)          // via /bin/sh -c
+IO.open(path, .read)                       // Mode is an OptionSet:
+IO.open(path, [.read, .write])             // ...so modes compose
+IO.open(path, [.read, .append])            // read anywhere, write at the end
+IO.popen(command, .read)                   // via /bin/sh -c (.read or .write)
 IO.readPipe(from: ["ls", "-la", path])     // "cmd |"  — argv, NO shell
 IO.writePipe(to: ["sort", "-o", output])   // "| cmd"  — argv, NO shell
 IO.open3(argv) / IO.open3(command)         // stdin + stdout + stderr

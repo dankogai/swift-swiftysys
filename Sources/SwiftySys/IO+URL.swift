@@ -56,7 +56,7 @@ extension IO {
         if url.isFileURL {
             return try open(FilePath(url.path(percentEncoded: false)), mode)
         }
-        switch mode {
+        switch mode {         // network URLs are one-way: .read or .write
         case .read:
             var request = URLRequest(url: url)
             request.httpMethod = method ?? "GET"
@@ -91,7 +91,7 @@ extension IO {
                 return http.map { Int32($0.statusCode) }
             }
             return io
-        case .append, .readWrite:
+        default:
             throw Errno.invalidArgument
         }
     }
