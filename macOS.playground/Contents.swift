@@ -128,12 +128,13 @@ try failing.close()                      // 1
 //: `>` writes (throws if target exists), `>!` clobbers,
 //: `>>` appends (target must exist), `>>!` creates too.
 //: Mirrors `<` `!<` `<<` `!<<` do the same, bang mirrored.
-let src = demo.pathString + "/hello.txt"
+//: Sources are FS nodes or IO streams — never bare Strings:
+//: `"a" > "b"` stays a plain Swift string comparison.
 let dst = demo.pathString + "/hello.copy"
-try src > dst                            // copy, safely
+try demo["hello.txt"] > dst              // copy, safely
 FS(dst).string
 //: Running it twice would throw EEXIST — hence the bang:
-try src >! dst                           // clobber, deliberately
+try demo["hello.txt"] >! dst             // clobber, deliberately
 try demo["hello.txt"] >>! (demo.pathString + "/all.txt")  // node → append
 try IO.readPipe(from: ["date"]) >>! (demo.pathString + "/all.txt")  // stream → append
 FS(demo.pathString + "/all.txt").string

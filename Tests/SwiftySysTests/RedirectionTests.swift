@@ -13,10 +13,8 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 @Suite struct NoclobberWrite {
     @Test func writesToNewTarget() throws {
         try withTempDir { dir in
-            try dir["src.txt"].write("payload\n")
-            let src = dir.pathString + "/src.txt"
-            let dst = dir.pathString + "/dst.txt"
-            let node = try src > dst           // String source
+            let src = try dir["src.txt"].write("payload\n")
+            let node = try src > dir.pathString + "/dst.txt"
             #expect(node.isFile)
             #expect(node.string == "payload\n")
         }
@@ -24,10 +22,10 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 
     @Test func refusesExistingTarget() throws {
         try withTempDir { dir in
-            try dir["src.txt"].write("new")
+            let src = try dir["src.txt"].write("new")
             try dir["dst.txt"].write("precious")
             #expect(throws: Errno.fileExists) {
-                try dir.pathString + "/src.txt" > dir.pathString + "/dst.txt"
+                try src > dir.pathString + "/dst.txt"
             }
             #expect(dir["dst.txt"].string == "precious")   // untouched
         }
@@ -35,27 +33,24 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 
     @Test func bangClobbers() throws {
         try withTempDir { dir in
-            try dir["src.txt"].write("new content")
+            let src = try dir["src.txt"].write("new content")
             try dir["dst.txt"].write("old content")
-            try dir.pathString + "/src.txt" >! dir.pathString + "/dst.txt"
+            try src >! dir.pathString + "/dst.txt"
             #expect(dir["dst.txt"].string == "new content")
         }
     }
 
     @Test func mirrorsAreSynonyms() throws {
         try withTempDir { dir in
-            try dir["src.txt"].write("x")
+            let src = try dir["src.txt"].write("x")
             let dst1 = dir.pathString + "/one.txt"
-            // String < String is a deliberate compile-time ambiguity
-            // (it would collide with Comparable); FS(...) < works
-            try FS(dir.pathString + "/src.txt") < dst1
+            try src < dst1
             #expect(FS(dst1).string == "x")
             #expect(throws: Errno.fileExists) {
-                try FS(dir.pathString + "/src.txt") < dst1   // noclobber too
+                try src < dst1                             // noclobber too
             }
             try dir["dst2"].write("old")
-            let dst2 = dir.pathString + "/dst2"
-            try dir.pathString + "/src.txt" !< dst2
+            try src !< dir.pathString + "/dst2"
             #expect(dir["dst2"].string == "x")
         }
     }
@@ -63,7 +58,7 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     @Test func missingSourceThrows() throws {
         try withTempDir { dir in
             #expect(throws: Errno.noSuchFileOrDirectory) {
-                try dir.pathString + "/nope.txt" > dir.pathString + "/dst.txt"
+                try FS(dir.pathString + "/nope.txt") > dir.pathString + "/dst.txt"
             }
             #expect(!dir["dst.txt"].exists)
         }
@@ -74,9 +69,8 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     @Test func appendsToExisting() throws {
         try withTempDir { dir in
             try dir["log.txt"].write("one\n")
-            try dir["more.txt"].write("two\n")
-            // note: >> binds tighter than +, so paths go in lets
-            let more = dir.pathString + "/more.txt"
+            let more = try dir["more.txt"].write("two\n")
+            // note: >> binds tighter than +, so the path goes in a let
             let log = dir.pathString + "/log.txt"
             try more >> log
             #expect(dir["log.txt"].string == "one\ntwo\n")
@@ -87,8 +81,7 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 
     @Test func plainAppendRequiresTarget() throws {
         try withTempDir { dir in
-            try dir["src.txt"].write("x")
-            let src = dir.pathString + "/src.txt"
+            let src = try dir["src.txt"].write("x")
             let missing = dir.pathString + "/missing.log"
             #expect(throws: Errno.noSuchFileOrDirectory) { try src >> missing }
             #expect(throws: Errno.noSuchFileOrDirectory) { try src << missing }
@@ -97,8 +90,7 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 
     @Test func bangAppendCreates() throws {
         try withTempDir { dir in
-            try dir["src.txt"].write("first\n")
-            let src = dir.pathString + "/src.txt"
+            let src = try dir["src.txt"].write("first\n")
             let log = dir.pathString + "/fresh.log"
             try src >>! log
             #expect(FS(log).string == "first\n")
@@ -109,14 +101,6 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 }
 
 @Suite struct RedirectSources {
-    @Test func fsNodeAsSource() throws {
-        try withTempDir { dir in
-            let src = try dir["node.txt"].write("from a node\n")
-            try src > dir.pathString + "/copy.txt"
-            #expect(dir["copy.txt"].string == "from a node\n")
-        }
-    }
-
     @Test func ioStreamAsSource() throws {
         try withTempDir { dir in
             // a pipe drains straight into a file
@@ -129,18 +113,21 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
 
     @Test func chainsThroughReturnValue() throws {
         try withTempDir { dir in
-            try dir["a.txt"].write("chained\n")
+            let a = try dir["a.txt"].write("chained\n")
             // the returned FS node is itself a RedirectionSource
-            let b = try dir.pathString + "/a.txt" > dir.pathString + "/b.txt"
+            let b = try a > dir.pathString + "/b.txt"
             try b > dir.pathString + "/c.txt"
             #expect(dir["c.txt"].string == "chained\n")
         }
     }
 
-    @Test func stringComparisonStillWorks() {
-        // defining > and < on String must not break Comparable
+    @Test func stringsStayStrings() {
+        // String is deliberately NOT a RedirectionSource:
+        // these are plain Swift comparisons, exactly as before
         #expect("b" > "a")
         #expect("a" < "b")
+        let comparison = "draft.txt" > "final.txt"   // Bool, not a redirect
+        #expect(comparison == false)                 // "d" sorts before "f"
         #expect(["c", "a", "b"].sorted(by: <) == ["a", "b", "c"])
     }
 }
