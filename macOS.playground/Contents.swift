@@ -124,6 +124,20 @@ let failing = try IO.readPipe(from: ["false"])
 try failing.readAll()
 try failing.close()                      // 1
 
+//: ## Redirection operators — noclobber manners
+//: `>` writes (throws if target exists), `>!` clobbers,
+//: `>>` appends (target must exist), `>>!` creates too.
+//: Mirrors `<` `!<` `<<` `!<<` do the same, bang mirrored.
+let src = demo.pathString + "/hello.txt"
+let dst = demo.pathString + "/hello.copy"
+try src > dst                            // copy, safely
+FS(dst).string
+//: Running it twice would throw EEXIST — hence the bang:
+try src >! dst                           // clobber, deliberately
+try demo["hello.txt"] >>! (demo.pathString + "/all.txt")  // node → append
+try IO.readPipe(from: ["date"]) >>! (demo.pathString + "/all.txt")  // stream → append
+FS(demo.pathString + "/all.txt").string
+
 //: ## open3 — stdout and stderr, separately (IPC::Open3)
 let p3 = try IO.open3("echo output; echo diagnostics >&2")
 try p3.stdout.readString()               // "output\n"

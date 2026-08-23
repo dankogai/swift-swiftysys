@@ -59,6 +59,12 @@ try sink.close()                            // waits; exit status returned
 
 try qx("uname -a")                          // Perl's backticks
 
+// ---- redirection operators, noclobber manners ----
+try "draft.txt" > "final.txt"               // write; throws if target exists
+try "draft.txt" >! "final.txt"              // csh's >! — clobbers
+try FS("/var/log/a.log") >> "all.log"       // append; target must exist
+try IO.open("make 2>&1 |") >>! "build.log"  // append; creates if absent
+
 // ---- HTTPS: the secure web ----
 try IO.HTTPS("example.com").get().bodyString            // that's a GET
 try IO.HTTPS("api.github.com")["users"]["dankogai"]     // chain paths, FS-style
@@ -304,6 +310,34 @@ Sys.env["DEBUG"] = "1"           // setenv — visible to children
 Sys.env.unset("DEBUG")           // unsetenv (assigning nil works too)
 for (key, value) in Sys.env { print("\(key)=\(value)") }
 ```
+
+## Redirection operators
+
+Shell redirection with csh/zsh noclobber manners. The right-hand side
+is the target file name; the left-hand side — an `FS` node, an `IO`
+stream, or a source file name in `String` — pours its contents in.
+Each returns the fresh `FS` node of the target:
+
+| operator | mirror | action | target exists | target missing |
+|---|---|---|---|---|
+| `>`  | `<`   | write  | **throws** `EEXIST` | creates |
+| `>!` | `!<`  | write  | clobbers | creates |
+| `>>` | `<<`  | append | appends | **throws** `ENOENT` |
+| `>>!`| `!<<` | append | appends | creates |
+
+```swift
+try "draft.txt" > "final.txt"      // safe by default
+try "draft.txt" >! "final.txt"     // the bang means you mean it
+try node >> "app.log"              // append to an existing log
+try stream >>! "app.log"           // ...creating it if needed
+try FS("src") !< "dst"             // mirrors, bang mirrored too
+```
+
+Two parsing notes: `>>`-family operators bind tighter than `+`, so
+build target paths into a variable rather than concatenating inline;
+and `try "a" < "b"` with two bare strings is a deliberate compile-time
+ambiguity (it would collide with `Comparable`) — use the `>` spelling
+or wrap the source: `try FS("a") < "b"`.
 
 ## `IO.HTTPS` — the secure web
 
