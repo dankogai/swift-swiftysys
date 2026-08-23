@@ -1,0 +1,279 @@
+//
+//  FS+Posix.swift
+//  SwiftySys
+//
+//  The classic manipulation calls — chmod, chown, rename, link,
+//  utime, truncate, mkfifo — in the house style: throwing Errno,
+//  @discardableResult, returning the fresh node. The process-global
+//  pair (chdir, umask) lives on Sys, where process state belongs.
+//
+//      try FS("script.sh").chmod(0o755)
+//      try FS("data.log").chown(user: "dankogai")
+//      try FS("draft.txt").rename(to: "final.txt")
+//      try FS.temp["stamp"].touch()
+//
+import Foundation
+
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
+// The methods shadow the C names, so the syscalls get a namespace.
+private enum C {
+    static func chmod(_ p: UnsafePointer<CChar>, _ m: CInterop.Mode) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.chmod(p, m)
+        #else
+        Glibc.chmod(p, m)
+        #endif
+    }
+    static func chown(_ p: UnsafePointer<CChar>, _ u: uid_t, _ g: gid_t) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.chown(p, u, g)
+        #else
+        Glibc.chown(p, u, g)
+        #endif
+    }
+    static func rename(_ old: UnsafePointer<CChar>, _ new: UnsafePointer<CChar>) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.rename(old, new)
+        #else
+        Glibc.rename(old, new)
+        #endif
+    }
+    static func link(_ old: UnsafePointer<CChar>, _ new: UnsafePointer<CChar>) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.link(old, new)
+        #else
+        Glibc.link(old, new)
+        #endif
+    }
+    static func truncate(_ p: UnsafePointer<CChar>, _ size: off_t) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.truncate(p, size)
+        #else
+        Glibc.truncate(p, size)
+        #endif
+    }
+    static func mkfifo(_ p: UnsafePointer<CChar>, _ m: CInterop.Mode) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.mkfifo(p, m)
+        #else
+        Glibc.mkfifo(p, m)
+        #endif
+    }
+    static func utimes(_ p: UnsafePointer<CChar>, _ t: UnsafePointer<timeval>?) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.utimes(p, t)
+        #else
+        Glibc.utimes(p, t)
+        #endif
+    }
+    static func chdir(_ p: UnsafePointer<CChar>) -> Int32 {
+        #if canImport(Darwin)
+        Darwin.chdir(p)
+        #else
+        Glibc.chdir(p)
+        #endif
+    }
+    static func umask(_ m: CInterop.Mode) -> CInterop.Mode {
+        #if canImport(Darwin)
+        Darwin.umask(m)
+        #else
+        Glibc.umask(m)
+        #endif
+    }
+}
+
+extension FS {
+    private func withExistingPath<T>(_ body: (FilePath) throws -> T) throws -> T {
+        if case .error(let e, _) = self { throw e }
+        return try body(path)
+    }
+
+    private func syscall(_ body: (FilePath) -> Int32) throws -> FS {
+        try withExistingPath { p in
+            guard body(p) == 0 else { throw Errno(rawValue: errno) }
+            return FS(p)
+        }
+    }
+
+    // MARK: - chmod
+
+    /// Changes the permission bits — `chmod(2)` (follows symlinks).
+    @discardableResult
+    public func chmod(_ permissions: FilePermissions) throws -> FS {
+        try chmod(permissions.rawValue)
+    }
+
+    /// The octal spelling: `try FS("script.sh").chmod(0o755)`.
+    @discardableResult
+    public func chmod(_ mode: CInterop.Mode) throws -> FS {
+        try syscall { p in p.withPlatformString { C.chmod($0, mode) } }
+    }
+
+    // MARK: - chown
+
+    /// Changes owner and/or group by id — `chown(2)` (follows
+    /// symlinks). `nil` leaves that half unchanged.
+    @discardableResult
+    public func chown(uid: uid_t? = nil, gid: gid_t? = nil) throws -> FS {
+        try syscall { p in
+            p.withPlatformString { C.chown($0, uid ?? .max, gid ?? .max) }
+        }
+    }
+
+    /// Changes owner and/or group by name, Perl-style.
+    @discardableResult
+    public func chown(user: String? = nil, group: String? = nil) throws -> FS {
+        var uid: uid_t?
+        var gid: gid_t?
+        if let user {
+            guard let pw = getpwnam(user) else { throw Errno.invalidArgument }
+            uid = pw.pointee.pw_uid
+        }
+        if let group {
+            guard let gr = getgrnam(group) else { throw Errno.invalidArgument }
+            gid = gr.pointee.gr_gid
+        }
+        return try chown(uid: uid, gid: gid)
+    }
+
+    // MARK: - rename & link
+
+    /// Moves the node — `rename(2)`. Returns the node at its new home.
+    @discardableResult
+    public func rename(to newPath: FilePath) throws -> FS {
+        try withExistingPath { p in
+            let rc = p.withPlatformString { old in
+                newPath.withPlatformString { new in C.rename(old, new) }
+            }
+            guard rc == 0 else { throw Errno(rawValue: errno) }
+            return FS(newPath)
+        }
+    }
+
+    @discardableResult
+    public func rename(to newPath: String) throws -> FS {
+        try rename(to: FilePath(newPath))
+    }
+
+    /// Creates a hard link at `newPath` to this node — `link(2)`.
+    /// Returns the new link's node.
+    @discardableResult
+    public func link(to newPath: FilePath) throws -> FS {
+        try withExistingPath { p in
+            let rc = p.withPlatformString { old in
+                newPath.withPlatformString { new in C.link(old, new) }
+            }
+            guard rc == 0 else { throw Errno(rawValue: errno) }
+            return FS(newPath)
+        }
+    }
+
+    @discardableResult
+    public func link(to newPath: String) throws -> FS {
+        try link(to: FilePath(newPath))
+    }
+
+    // MARK: - times & size
+
+    /// Sets access/modification times — `utimes(2)`. With both `nil`
+    /// (the default), sets both to now; with one `nil`, the other
+    /// keeps its current value.
+    @discardableResult
+    public func utime(atime: Date? = nil, mtime: Date? = nil) throws -> FS {
+        try withExistingPath { p in
+            let rc: Int32
+            if atime == nil && mtime == nil {
+                rc = p.withPlatformString { C.utimes($0, nil) }
+            } else {
+                let newAtime = atime ?? self.atime ?? Date()
+                let newMtime = mtime ?? self.mtime ?? Date()
+                let times = [timeval(newAtime), timeval(newMtime)]
+                rc = p.withPlatformString { s in
+                    times.withUnsafeBufferPointer { C.utimes(s, $0.baseAddress) }
+                }
+            }
+            guard rc == 0 else { throw Errno(rawValue: errno) }
+            return FS(p)
+        }
+    }
+
+    /// The shell's `touch`: creates an empty file if absent,
+    /// updates both times to now if present.
+    @discardableResult
+    public func touch() throws -> FS {
+        if case .error(let e, _) = self {
+            guard e == .noSuchFileOrDirectory else { throw e }
+            let fd = try FileDescriptor.open(
+                path, .writeOnly, options: [.create],
+                permissions: [.ownerReadWrite, .groupRead, .otherRead])
+            try fd.close()
+            return refreshed()
+        }
+        return try utime()
+    }
+
+    /// Cuts (or zero-extends) the file to `size` bytes — `truncate(2)`.
+    @discardableResult
+    public func truncate(to size: Int64 = 0) throws -> FS {
+        try syscall { p in p.withPlatformString { C.truncate($0, off_t(size)) } }
+    }
+
+    // MARK: - mkfifo
+
+    /// Creates a named pipe at this node's path — `mkfifo(2)`.
+    /// A no-op if the node already is a `.fifo`.
+    @discardableResult
+    public func mkfifo(permissions: FilePermissions = [.ownerReadWrite]) throws -> FS {
+        switch self {
+        case .fifo:
+            return self
+        case .error(.noSuchFileOrDirectory, let p):
+            let rc = p.withPlatformString { C.mkfifo($0, permissions.rawValue) }
+            guard rc == 0 else { throw Errno(rawValue: errno) }
+            return refreshed()
+        case .error(let e, _):
+            throw e
+        default:
+            throw Errno.fileExists
+        }
+    }
+}
+
+extension Sys {
+    /// Changes the working directory — `chdir(2)`. Process-global,
+    /// which is why it lives on Sys, not FS.
+    public static func chdir(_ path: FilePath) throws {
+        let rc = path.withPlatformString { C.chdir($0) }
+        guard rc == 0 else { throw Errno(rawValue: errno) }
+    }
+
+    public static func chdir(_ path: String) throws {
+        try chdir(FilePath(path))
+    }
+
+    public static func chdir(_ node: FS) throws {
+        if case .error(let e, _) = node { throw e }
+        try chdir(node.path)
+    }
+
+    /// Sets the file-creation mask — `umask(2)` — and returns the
+    /// previous one. Process-global.
+    @discardableResult
+    public static func umask(_ mask: FilePermissions) -> FilePermissions {
+        FilePermissions(rawValue: C.umask(mask.rawValue))
+    }
+}
+
+extension timeval {
+    fileprivate init(_ date: Date) {
+        let interval = date.timeIntervalSince1970
+        let sec = interval.rounded(.down)
+        self.init(tv_sec: time_t(sec),
+                  tv_usec: suseconds_t((interval - sec) * 1_000_000))
+    }
+}

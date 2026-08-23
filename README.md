@@ -152,6 +152,23 @@ starts to beat Perl.
 `Errno` on failure and return the fresh node on success
 (`@discardableResult`).
 
+The classic POSIX manipulation calls follow the same shape:
+
+```swift
+try FS("script.sh").chmod(0o755)          // or chmod([.ownerReadWrite])
+try FS("data.log").chown(user: "dankogai")  // or chown(uid:gid:), by id
+try FS("draft.txt").rename(to: "final.txt")
+try FS("original").link(to: "mirror")     // hard link — link(2)
+try FS("f").utime(mtime: someDate)        // utimes(2); no args = now
+try FS.temp["stamp"].touch()              // creates or freshens
+try FS("big.log").truncate(to: 0)
+try FS.temp["pipe"].mkfifo()              // a .fifo is born
+```
+
+The process-global pair lives on `Sys`, where process state belongs:
+`Sys.chdir(path_or_node)` and `Sys.umask(mask)` (returns the previous
+mask).
+
 ### Assignment sugar
 
 The dictionary metaphor goes all the way — `=` writes, `+=` appends:

@@ -4,6 +4,7 @@
 //:
 //: (Open the package folder in Xcode and run this playground;
 //:  it builds the SwiftySys scheme automatically.)
+import Foundation
 import SwiftySys
 
 //: ## FS — what is it?
@@ -80,6 +81,21 @@ FS("/etc/hosts")["nope"].error               // ...and here is why
 //: A chain into a not-yet-existing path knows where to create:
 try demo["a"]["b"]["c"].mkdir(withIntermediates: true)
 demo["a"]["b"]["c"].isDirectory
+
+//: ## The classic POSIX calls, house style
+try demo["hello.txt"].chmod(0o600)
+demo["hello.txt"].permissions
+try demo["hello.txt"].chown(user: Sys.user)  // to ourselves — allowed
+let renamed = try demo["hello.txt"].rename(to: demo.pathString + "/renamed.txt")
+let mirror = try renamed.link(to: demo.pathString + "/mirror.txt")
+mirror.inode == renamed.inode            // hard links share the inode
+try renamed.rename(to: demo.pathString + "/hello.txt")  // put it back
+try demo["hello.txt"].utime(mtime: Date(timeIntervalSince1970: 0))
+demo["hello.txt"].mtime                  // the epoch!
+try demo["hello.txt"].touch()            // freshened
+try demo["stamp"].touch()                // created
+try demo["pipe"].mkfifo()                // FS.fifo(...)
+try mirror.remove()
 
 //: Symlinks:
 let link = try demo["shortcut"].symlink(to: "hello.txt")

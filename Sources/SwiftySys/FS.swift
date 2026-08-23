@@ -94,6 +94,7 @@ public enum FS: Sendable, Equatable, Hashable {
     public var isFile: Bool { if case .file = self { return true }; return false }
     public var isDirectory: Bool { if case .directory = self { return true }; return false }
     public var isSymlink: Bool { if case .symlink = self { return true }; return false }
+    public var isFifo: Bool { if case .fifo = self { return true }; return false }
 
     /// Descends into a directory. Chainable without unwrapping:
     ///
