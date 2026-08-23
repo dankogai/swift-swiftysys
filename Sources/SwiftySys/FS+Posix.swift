@@ -227,6 +227,93 @@ extension FS {
         return mode
     }
 
+    // MARK: - Permission bits as properties
+
+    /// The mode with symlinks followed — these properties are about
+    /// what the node *is*, so a link reports (and chmods) its target.
+    /// (realpath + lstat ≡ stat, without fighting Darwin's stat
+    /// struct/function name collision.)
+    private var followedMode: CInterop.Mode? {
+        let target = resolved()
+        if case .error = target { return nil }
+        return (try? FS.lstat(target.path).get()).map { $0.st_mode & 0o7777 }
+    }
+
+    private func hasBit(_ bit: CInterop.Mode) -> Bool {
+        followedMode.map { $0 & bit != 0 } ?? false
+    }
+
+    private func setBit(_ bit: CInterop.Mode, to on: Bool) {
+        guard let mode = followedMode else { return }
+        let target = on ? mode | bit : mode & ~bit
+        if target != mode { try? chmod(target) }
+    }
+
+    /// The permission bits, one Bool at a time — readable and settable:
+    ///
+    /// ```swift
+    /// FS("script.sh").executable = true     // chmod u+x
+    /// FS("secret").otherReadable = false    // chmod o-r
+    /// if FS("f").groupWritable { ... }
+    /// ```
+    ///
+    /// The bare `readable`/`writable`/`executable` mean the *user*
+    /// (owner) bit; `user`/`group`/`other`-prefixed forms disambiguate.
+    /// Getters are `false` on error nodes; setters are best-effort
+    /// sugar (silent on failure) — use `chmod` when you want errors.
+    public var userReadable: Bool {
+        get { hasBit(0o400) }
+        nonmutating set { setBit(0o400, to: newValue) }
+    }
+    public var userWritable: Bool {
+        get { hasBit(0o200) }
+        nonmutating set { setBit(0o200, to: newValue) }
+    }
+    public var userExecutable: Bool {
+        get { hasBit(0o100) }
+        nonmutating set { setBit(0o100, to: newValue) }
+    }
+    public var groupReadable: Bool {
+        get { hasBit(0o040) }
+        nonmutating set { setBit(0o040, to: newValue) }
+    }
+    public var groupWritable: Bool {
+        get { hasBit(0o020) }
+        nonmutating set { setBit(0o020, to: newValue) }
+    }
+    public var groupExecutable: Bool {
+        get { hasBit(0o010) }
+        nonmutating set { setBit(0o010, to: newValue) }
+    }
+    public var otherReadable: Bool {
+        get { hasBit(0o004) }
+        nonmutating set { setBit(0o004, to: newValue) }
+    }
+    public var otherWritable: Bool {
+        get { hasBit(0o002) }
+        nonmutating set { setBit(0o002, to: newValue) }
+    }
+    public var otherExecutable: Bool {
+        get { hasBit(0o001) }
+        nonmutating set { setBit(0o001, to: newValue) }
+    }
+
+    /// `userReadable`, without the prefix.
+    public var readable: Bool {
+        get { userReadable }
+        nonmutating set { userReadable = newValue }
+    }
+    /// `userWritable`, without the prefix.
+    public var writable: Bool {
+        get { userWritable }
+        nonmutating set { userWritable = newValue }
+    }
+    /// `userExecutable`, without the prefix.
+    public var executable: Bool {
+        get { userExecutable }
+        nonmutating set { userExecutable = newValue }
+    }
+
     // MARK: - chown
 
     /// Changes owner and/or group by id — `chown(2)` (follows

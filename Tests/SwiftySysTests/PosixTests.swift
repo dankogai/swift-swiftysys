@@ -51,6 +51,69 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     }
 }
 
+@Suite struct PermissionBits {
+    @Test func gettersReadTheMatrix() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("x")
+            try file.chmod(0o644)
+            #expect(file.readable && file.writable && !file.executable)
+            #expect(file.userReadable && file.userWritable && !file.userExecutable)
+            #expect(file.groupReadable && !file.groupWritable && !file.groupExecutable)
+            #expect(file.otherReadable && !file.otherWritable && !file.otherExecutable)
+        }
+    }
+
+    @Test func settersChmodOneBit() throws {
+        try withTempDir { dir in
+            let file = try dir["script.sh"].write("#!/bin/sh\n")
+            try file.chmod(0o644)
+            file.executable = true                 // bare = user
+            #expect(file.mode.map { $0 & 0o7777 } == 0o744)
+            file.groupWritable = true
+            #expect(file.mode.map { $0 & 0o7777 } == 0o764)
+            file.otherReadable = false
+            #expect(file.mode.map { $0 & 0o7777 } == 0o760)
+            file.executable = false
+            #expect(file.mode.map { $0 & 0o7777 } == 0o660)
+            file.executable = false                // already off — no-op
+            #expect(file.mode.map { $0 & 0o7777 } == 0o660)
+        }
+    }
+
+    @Test func bareAliasesAreUser() throws {
+        try withTempDir { dir in
+            let file = try dir["f"].write("x")
+            try file.chmod(0o044)                  // group/other read, user nothing
+            #expect(!file.readable)                // bare speaks for user
+            #expect(file.groupReadable)
+            file.readable = true
+            #expect(file.userReadable)
+        }
+    }
+
+    @Test func errorNodesAreFalseAndSilent() throws {
+        try withTempDir { dir in
+            let ghost = dir["nope.txt"]
+            #expect(!ghost.readable)
+            ghost.readable = true                  // best-effort: silent no-op
+            #expect(!dir["nope.txt"].exists)
+        }
+    }
+
+    @Test func symlinksFollowTheTarget() throws {
+        try withTempDir { dir in
+            let target = try dir["target.txt"].write("x")
+            try target.chmod(0o644)
+            let link = try dir["link"].symlink(to: "target.txt")
+            #expect(link.writable)                 // the target's bit, not the link's
+            link.executable = true                 // chmods the target
+            #expect(target.userExecutable)
+            try target.chmod(0o444)
+            #expect(!link.writable)
+        }
+    }
+}
+
 @Suite struct SymbolicChmod {
     // the pure parser, with umask and directory-ness explicit
     private func mode(_ spec: String, on current: CInterop.Mode,
