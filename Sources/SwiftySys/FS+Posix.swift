@@ -103,15 +103,16 @@ extension FS {
     // MARK: - chmod
 
     /// Changes the permission bits — `chmod(2)` (follows symlinks).
+    /// `FS.Permissions` speaks ugo and takes integer literals, so the
+    /// typed and octal spellings are one overload:
+    ///
+    /// ```swift
+    /// try FS("script.sh").chmod(0o755)
+    /// try FS("f").chmod([.userAll, .groupRead, .otherRead])
+    /// ```
     @discardableResult
-    public func chmod(_ permissions: FilePermissions) throws -> FS {
-        try chmod(permissions.rawValue)
-    }
-
-    /// The octal spelling: `try FS("script.sh").chmod(0o755)`.
-    @discardableResult
-    public func chmod(_ mode: CInterop.Mode) throws -> FS {
-        try syscall { p in p.withPlatformString { C.chmod($0, mode) } }
+    public func chmod(_ permissions: Permissions) throws -> FS {
+        try syscall { p in p.withPlatformString { C.chmod($0, permissions.rawValue) } }
     }
 
     /// chmod(1)'s symbolic modes, BSD-style:
@@ -128,7 +129,8 @@ extension FS {
     /// single `u`/`g`/`o` to copy. Malformed specs throw `EINVAL`.
     @discardableResult
     public func chmod(_ symbolic: String) throws -> FS {
-        guard let st = stat else {
+        // followed mode: chmod(1) is about the target, symlinks and all
+        guard let current = followedMode else {
             if case .error(let e, _) = self { throw e }
             throw Errno.noSuchFileOrDirectory
         }
@@ -137,11 +139,11 @@ extension FS {
         _ = C.umask(mask)
         let newMode = try FS.symbolicMode(
             symbolic,
-            applyingTo: st.st_mode & 0o7777,
+            applyingTo: current,
             isDirectory: resolved().isDirectory,
             umask: mask
         )
-        return try chmod(newMode)
+        return try chmod(Permissions(rawValue: newMode))
     }
 
     /// The pure heart of symbolic chmod — split out so it is testable
@@ -246,7 +248,7 @@ extension FS {
     private func setBit(_ bit: CInterop.Mode, to on: Bool) {
         guard let mode = followedMode else { return }
         let target = on ? mode | bit : mode & ~bit
-        if target != mode { try? chmod(target) }
+        if target != mode { try? chmod(Permissions(rawValue: target)) }
     }
 
     /// The permission bits, one Bool at a time — readable and settable:
@@ -298,20 +300,24 @@ extension FS {
         nonmutating set { setBit(0o001, to: newValue) }
     }
 
-    /// `userReadable`, without the prefix.
+    /// The bare forms are asymmetric on purpose, both halves matching
+    /// habit: *reading* asks about the user (owner) bit — Perl's `-x`;
+    /// *setting* is the shell's `chmod +x` / `-x` — all classes,
+    /// honoring the umask. Use the `user`/`group`/`other`-prefixed
+    /// properties for exact single-bit control.
     public var readable: Bool {
         get { userReadable }
-        nonmutating set { userReadable = newValue }
+        nonmutating set { try? chmod(newValue ? "+r" : "-r") }
     }
-    /// `userWritable`, without the prefix.
+    /// Getter: the user bit. Setter: `chmod +w` / `-w` (umasked all).
     public var writable: Bool {
         get { userWritable }
-        nonmutating set { userWritable = newValue }
+        nonmutating set { try? chmod(newValue ? "+w" : "-w") }
     }
-    /// `userExecutable`, without the prefix.
+    /// Getter: the user bit. Setter: `chmod +x` / `-x` (umasked all).
     public var executable: Bool {
         get { userExecutable }
-        nonmutating set { userExecutable = newValue }
+        nonmutating set { try? chmod(newValue ? "+x" : "-x") }
     }
 
     // MARK: - chown
@@ -428,7 +434,7 @@ extension FS {
     /// Creates a named pipe at this node's path — `mkfifo(2)`.
     /// A no-op if the node already is a `.fifo`.
     @discardableResult
-    public func mkfifo(permissions: FilePermissions = [.ownerReadWrite]) throws -> FS {
+    public func mkfifo(permissions: Permissions = [.userRead, .userWrite]) throws -> FS {
         switch self {
         case .fifo:
             return self
@@ -462,10 +468,11 @@ extension Sys {
     }
 
     /// Sets the file-creation mask — `umask(2)` — and returns the
-    /// previous one. Process-global.
+    /// previous one. Process-global. Takes octal literals too:
+    /// `Sys.umask(0o022)`.
     @discardableResult
-    public static func umask(_ mask: FilePermissions) -> FilePermissions {
-        FilePermissions(rawValue: C.umask(mask.rawValue))
+    public static func umask(_ mask: FS.Permissions) -> FS.Permissions {
+        FS.Permissions(rawValue: C.umask(mask.rawValue))
     }
 }
 

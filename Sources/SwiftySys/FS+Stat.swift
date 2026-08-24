@@ -25,9 +25,26 @@ extension FS {
     /// The full `st_mode` including the file-type bits.
     public var mode: CInterop.Mode? { stat?.st_mode }
 
-    /// The permission bits only (rwxrwxrwx + sticky/setuid/setgid).
-    public var permissions: FilePermissions? {
-        stat.map { FilePermissions(rawValue: $0.st_mode & ~S_IFMT) }
+    /// The permission bits only (rwxrwxrwx + sticky/setuid/setgid),
+    /// in the ugo vocabulary. Compares against octal literals
+    /// (`FS("f").permissions == 0o644`) and, being settable, takes
+    /// the compound assignments:
+    ///
+    /// ```swift
+    /// FS("f").permissions = 0o644                      // chmod
+    /// FS("f").permissions += .x                        // u+x (.r/.w/.x = user)
+    /// FS("f").permissions -= .groupWrite               // g-w
+    /// FS("f").permissions += (user: [], group: .w, other: .w)
+    /// ```
+    ///
+    /// The setter is best-effort sugar (silent, `nil` is a no-op) —
+    /// `chmod` is the throwing form.
+    public var permissions: Permissions? {
+        get { stat.map { Permissions(rawValue: $0.st_mode & 0o7777) } }
+        nonmutating set {
+            guard let newValue else { return }
+            try? chmod(newValue)
+        }
     }
 
     /// Last modification time.

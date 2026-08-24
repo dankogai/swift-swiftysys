@@ -90,12 +90,21 @@ try demo["hello.txt"].chmod("u+x")       // 0o700
 try demo["hello.txt"].chmod("a=rwX")     // 0o777 — u had x, so X applies
 try demo["hello.txt"].chmod("u=rw,go=r") // back to 0o644
 demo["hello.txt"].permissions
-//: ...or one Bool at a time — bare names mean the user (owner) bit:
-demo["hello.txt"].executable = true      // chmod u+x, as an assignment
+//: ...or one Bool at a time. Bare getters ask about the user bit;
+//: bare setters are the shell's `chmod +x` — all classes, umasked:
+demo["hello.txt"].executable = true      // chmod +x, as an assignment
 demo["hello.txt"].executable
+demo["hello.txt"].userExecutable = false // prefixed = exactly one bit
 demo["hello.txt"].otherWritable          // false
 demo["hello.txt"].groupReadable          // true
-demo["hello.txt"].executable = false     // and back
+demo["hello.txt"].executable = false     // chmod -x — and back
+//: ...or algebraically — += adds, -= removes, triad tuples compose:
+demo["hello.txt"].permissions += .x                        // u+x
+demo["hello.txt"].permissions += (user: [], group: .w, other: [])
+demo["hello.txt"].permissions                              // 0o764
+demo["hello.txt"].permissions -= [.x, .groupWrite]
+demo["hello.txt"].permissions = FS.Permissions(user: .rw, group: .r, other: .r)
+demo["hello.txt"].permissions                              // 0o644
 try demo["hello.txt"].chown(user: Sys.user)  // to ourselves — allowed
 let renamed = try demo["hello.txt"].rename(to: demo.pathString + "/renamed.txt")
 let mirror = try renamed.link(to: demo.pathString + "/mirror.txt")

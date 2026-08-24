@@ -230,8 +230,8 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
         try withTempDir { dir in
             let file = try dir["f.txt"].write("x")
             let perms = try #require(file.permissions)
-            #expect(perms.contains(.ownerReadWrite))
-            #expect(!perms.contains(.ownerExecute))
+            #expect(perms.contains([.userRead, .userWrite]))
+            #expect(!perms.contains(.userExecute))
         }
     }
 

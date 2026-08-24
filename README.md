@@ -155,14 +155,20 @@ starts to beat Perl.
 The classic POSIX manipulation calls follow the same shape:
 
 ```swift
-try FS("script.sh").chmod(0o755)          // or chmod([.ownerReadWrite])
+try FS("script.sh").chmod(0o755)          // FS.Permissions takes octal literals
+try FS("f").chmod([.userAll, .groupRead, .otherRead])  // ...and speaks ugo
 try FS("script.sh").chmod("u+x")          // or chmod(1)'s symbolic modes:
 try FS("shared").chmod("a=rwX")           // who ugoa, ops +-=, perms rwxXst,
 try FS("f").chmod("u=rwx,go=rx")          // permcopy ("g=u"), clauses compose
 
-FS("script.sh").executable = true         // bits as Bools — bare means user
-FS("secret").otherReadable = false        // user/group/other × R/W/X all exist
-if FS("f").groupWritable { ... }          // follows symlinks (it's about the node)
+FS("script.sh").executable = true         // the shell's chmod +x: umasked all
+FS("secret").otherReadable = false        // exact bits: user/group/other × R/W/X
+if FS("f").groupWritable { ... }          // bare getters ask about user (Perl -w)
+
+FS("f").permissions += .x                 // u+x (.r/.w/.x default to user too)
+FS("f").permissions -= .groupWrite        // g-w
+FS("f").permissions += (user: [], group: .w, other: .w)   // triad tuples
+FS("f").permissions = FS.Permissions(user: .rwx, group: .rx, other: .rx)
 try FS("data.log").chown(user: "dankogai")  // or chown(uid:gid:), by id
 try FS("draft.txt").rename(to: "final.txt")
 try FS("original").link(to: "mirror")     // hard link — link(2)

@@ -14,11 +14,13 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     @Test func chmodOctalAndTyped() throws {
         try withTempDir { dir in
             let file = try dir["f.sh"].write("#!/bin/sh\n")
-            try file.chmod(0o755)
-            #expect(file.permissions == [.ownerReadWriteExecute,
-                                         .groupReadExecute, .otherReadExecute])
-            try file.chmod([.ownerReadWrite])
-            #expect(file.permissions == [.ownerReadWrite])
+            try file.chmod(0o755)      // octal literal — same overload
+            #expect(file.permissions == 0o755)
+            #expect(file.permissions == [.userAll, .groupRead, .groupExecute,
+                                         .otherRead, .otherExecute])
+            try file.chmod([.userRead, .userWrite])
+            #expect(file.permissions == 0o600)
+            #expect(file.permissions?.description == "0o600")
         }
     }
 
@@ -67,27 +69,25 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
         try withTempDir { dir in
             let file = try dir["script.sh"].write("#!/bin/sh\n")
             try file.chmod(0o644)
-            file.executable = true                 // bare = user
+            file.userExecutable = true             // prefixed = exactly one bit
             #expect(file.mode.map { $0 & 0o7777 } == 0o744)
             file.groupWritable = true
             #expect(file.mode.map { $0 & 0o7777 } == 0o764)
             file.otherReadable = false
             #expect(file.mode.map { $0 & 0o7777 } == 0o760)
-            file.executable = false
+            file.userExecutable = false
             #expect(file.mode.map { $0 & 0o7777 } == 0o660)
-            file.executable = false                // already off — no-op
+            file.userExecutable = false            // already off — no-op
             #expect(file.mode.map { $0 & 0o7777 } == 0o660)
         }
     }
 
-    @Test func bareAliasesAreUser() throws {
+    @Test func bareGettersAreUser() throws {
         try withTempDir { dir in
             let file = try dir["f"].write("x")
             try file.chmod(0o044)                  // group/other read, user nothing
-            #expect(!file.readable)                // bare speaks for user
+            #expect(!file.readable)                // bare getters speak for user
             #expect(file.groupReadable)
-            file.readable = true
-            #expect(file.userReadable)
         }
     }
 
@@ -110,6 +110,70 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
             #expect(target.userExecutable)
             try target.chmod(0o444)
             #expect(!link.writable)
+        }
+    }
+}
+
+@Suite struct PermissionOperators {
+    @Test func plusMinusOnFiles() throws {
+        try withTempDir { dir in
+            let file = try dir["f.sh"].write("#!/bin/sh\n")
+            try file.chmod(0o644)
+            file.permissions += .x                 // .r/.w/.x default to user
+            #expect(file.permissions == 0o744)
+            file.permissions -= .w
+            #expect(file.permissions == 0o544)
+            file.permissions += .groupWrite
+            #expect(file.permissions == 0o564)
+            file.permissions -= [.groupRead, .groupWrite]
+            #expect(file.permissions == 0o504)
+        }
+    }
+
+    @Test func tupleForms() throws {
+        try withTempDir { dir in
+            let file = try dir["f"].write("x")
+            try file.chmod(0o600)
+            file.permissions += (user: .x, group: .rx, other: .rx)
+            #expect(file.permissions == 0o755)
+            file.permissions -= (user: [], group: .x, other: .x)
+            #expect(file.permissions == 0o744)
+            // assignment builds from the triads via the initializer
+            file.permissions = FS.Permissions(user: .rw, group: .r, other: .r)
+            #expect(file.permissions == 0o644)
+        }
+    }
+
+    @Test func triadAccessors() {
+        var p: FS.Permissions = 0o754
+        #expect(p.user == .rwx)
+        #expect(p.group == .rx)
+        #expect(p.other == .r)
+        p.group = .rw
+        #expect(p == 0o764)
+        p += .x
+        #expect(p == 0o764)                            // u+x was already set
+        p -= .r
+        #expect(p == 0o364)
+    }
+
+    @Test func pureValueAlgebra() {
+        var p: FS.Permissions = 0o600
+        p += .x
+        #expect(p == 0o700)
+        p -= .w
+        #expect(p == 0o500)
+        p += (user: [], group: .rwx, other: [])
+        #expect(p == 0o570)
+        #expect(FS.Permissions(user: .rwx, group: .rx, other: .rx) == 0o755)
+    }
+
+    @Test func errorNodesStaySilent() throws {
+        try withTempDir { dir in
+            let ghost = dir["nope"]
+            ghost.permissions += .x                // nil — silent no-op
+            ghost.permissions = 0o777              // setter on error node — no-op
+            #expect(!dir["nope"].exists)
         }
     }
 }
@@ -285,6 +349,26 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     @Test func chdirToErrorNodeThrows() {
         #expect(throws: Errno.noSuchFileOrDirectory) {
             try Sys.chdir(FS("/nonexistent-\(UUID().uuidString)"))
+        }
+    }
+
+    @Test func bareSettersAreUmaskedAll() throws {
+        // bare setters are the shell's chmod +x / -x: all classes,
+        // honoring the umask — hence this umask-controlled suite
+        let saved = Sys.umask(0o022)
+        defer { Sys.umask(saved) }
+        try withTempDir { dir in
+            let file = try dir["f"].write("x")
+            try file.chmod(0o600)
+            file.executable = true                 // chmod +x under umask 022
+            #expect(file.permissions == 0o711)
+            file.executable = false                // chmod -x
+            #expect(file.permissions == 0o600)
+            Sys.umask(0o027)
+            file.readable = true                   // +r & ~0o027 → user, group
+            #expect(file.permissions == 0o640)
+            file.writable = false                  // -w & ~0o027 → user only
+            #expect(file.permissions == 0o440)
         }
     }
 
