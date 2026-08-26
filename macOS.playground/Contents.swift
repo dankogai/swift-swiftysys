@@ -134,6 +134,18 @@ let sorted = try IO.open("sort \(demo.pathString)/numbers.txt |")
 try sorted.readString()                  // "1\n2\n3\n"
 try sorted.close()
 
+//: ## Lines — the diamond operator, buffered
+//: Perl's `while (<$fh>)`, spelled `for`-`in`. Lazy and single-pass;
+//: newlines stripped. `readLine()` is the throwing primitive.
+Array(try IO.open("sort \(demo.pathString)/numbers.txt |").lines)  // ["1", "2", "3"]
+for line in demo["numbers.txt"].lines {  // FS sugar — the streaming .string
+    line
+}
+let byLine = try demo["numbers.txt"].open()
+try byLine.readLine()                    // "3"
+try byLine.readLine(strippingNewline: false)  // "1\n" — chomp yourself
+try byLine.close()
+
 //: Perl's backticks:
 try IO.qx("uname -a")
 try IO.qx("date")

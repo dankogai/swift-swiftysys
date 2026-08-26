@@ -44,6 +44,9 @@ public final class IO {
     private let ownsFD: Bool
     private var process: Process?
     private var handle: FileHandle?     // keeps a pipe's fd alive
+    /// Read-ahead for line iteration; may hold a slice, so index
+    /// via `startIndex`, never `0`.
+    internal var readBuffer = Data()
     public private(set) var isClosed = false
     /// Exit status of the piped process — or, for URL streams, the
     /// HTTP status — available after `close()`.
@@ -211,17 +214,25 @@ public final class IO {
     // MARK: - Reading
 
     /// Reads up to `count` bytes; empty `Data` means EOF.
+    /// Bytes read ahead by `readLine()` are served first.
     public func read(_ count: Int) throws -> Data {
         if isClosed { throw Errno.badFileDescriptor }
+        if !readBuffer.isEmpty {
+            let out = Data(readBuffer.prefix(count))
+            readBuffer = readBuffer.dropFirst(count)
+            return out
+        }
         var buf = [UInt8](repeating: 0, count: count)
         let n = try buf.withUnsafeMutableBytes { try fd.read(into: $0) }
         return Data(buf[0..<n])
     }
 
     /// Reads to EOF — the slurp.
+    /// Bytes read ahead by `readLine()` are served first.
     public func readAll() throws -> Data {
         if isClosed { throw Errno.badFileDescriptor }
-        var data = Data()
+        var data = Data(readBuffer)
+        readBuffer = Data()
         var buf = [UInt8](repeating: 0, count: 1 << 16)
         while true {
             let n = try buf.withUnsafeMutableBytes { try fd.read(into: $0) }

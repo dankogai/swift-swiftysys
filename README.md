@@ -53,6 +53,9 @@ try out.close()
 let sorted = try IO.open("sort -u /tmp/words.txt |")   // read from a command
 print(try sorted.readString())
 
+for line in FS("/etc/hosts").lines          // buffered line iteration —
+    where !line.hasPrefix("#") { print(line) }  // Perl's while (<$fh>)
+
 let sink = try IO.open("| wc -l")           // write to a command
 try sink.write("a\nb\nc\n")
 try sink.close()                            // waits; exit status returned
@@ -272,6 +275,28 @@ waits for the process and returns the exit status (also kept in
 `terminationStatus`) — Perl's `close` setting `$?`. `IO.stdin` /
 `.stdout` / `.stderr` wrap the standard descriptors.
 
+### Lines — the diamond operator
+
+Buffered line iteration, Perl's `while (<$fh>)` spelled `for`-`in`:
+
+```swift
+for line in try IO.open("git log --oneline |").lines { ... }
+for line in FS("/etc/hosts").lines where !line.hasPrefix("#") { ... }
+for line in IO.stdin.lines { ... }                   // filters, Perl's -n
+while let line = try io.readLine() { ... }           // one at a time
+```
+
+`lines` is lazy and single-pass — it consumes the stream as it goes,
+so a 10GB log costs one 64KB buffer, not 10GB. Newlines (`\n` or
+`\r\n`) are stripped. The usual pair of temperaments: `readLine()` is
+the throwing primitive (strict UTF-8, `strippingNewline: false` if
+you'd rather chomp yourself); `lines` is the forgiving sugar — it
+never throws (a read error just ends the loop) and decodes lossily,
+so a stray binary byte yields U+FFFD instead of stopping you.
+`FS.lines` is best-effort like `FS.string`: unreadable nodes iterate
+as empty. Mixing granularities is safe — `read(_:)`/`readAll()` drain
+the line buffer's read-ahead first.
+
 `IO.qx(_:)` is the backtick: runs a command through the shell and returns
 its stdout as a `String`.
 
@@ -449,7 +474,6 @@ try IO.qx("uptime")
 ## Roadmap
 
 - `IO` sockets (`IO.connect(...)`, and opening `FS`'s `.socket`/`.fifo` nodes)
-- Buffered line iteration (`for line in io.lines`)
 - `copy` / `move`, glob
 
 ## Caveats

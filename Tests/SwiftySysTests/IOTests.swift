@@ -257,6 +257,129 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     }
 }
 
+@Suite struct LineIteration {
+    @Test func linesFromFile() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("one\ntwo\nthree\n")
+            #expect(Array(try file.open().lines) == ["one", "two", "three"])
+        }
+    }
+
+    @Test func lastLineWithoutNewline() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("a\nb")   // no trailing newline
+            #expect(Array(try file.open().lines) == ["a", "b"])
+        }
+    }
+
+    @Test func blankLinesSurvive() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("a\n\nb\n")
+            #expect(Array(try file.open().lines) == ["a", "", "b"])
+        }
+    }
+
+    @Test func crlfChomps() throws {
+        try withTempDir { dir in
+            let file = try dir["dos.txt"].write("a\r\nb\r\n")
+            #expect(Array(try file.open().lines) == ["a", "b"])
+        }
+    }
+
+    @Test func readLineStripsOrKeeps() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("one\ntwo")
+            let io = try file.open()
+            #expect(try io.readLine() == "one")
+            #expect(try io.readLine(strippingNewline: false) == "two")
+            #expect(try io.readLine() == nil)               // EOF
+            #expect(try io.readLine() == nil)               // stays EOF
+            try io.close()
+            let raw = try file.open()
+            #expect(try raw.readLine(strippingNewline: false) == "one\n")
+            try raw.close()
+        }
+    }
+
+    @Test func linesFromPipe() throws {
+        let io = try IO.open("printf 'a\\nb\\nc' |")
+        #expect(Array(io.lines) == ["a", "b", "c"])
+        #expect(try io.close() == 0)
+    }
+
+    @Test func mixesWithByteReads() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("head\nbody:0123456789\ntail\n")
+            let io = try file.open()
+            #expect(try io.readLine() == "head")            // buffers ahead
+            #expect(try io.read(5) == Data("body:".utf8))   // drains buffer
+            #expect(try io.readLine() == "0123456789")
+            #expect(try io.readAll() == Data("tail\n".utf8))
+            try io.close()
+        }
+    }
+
+    @Test func longLinesCrossChunks() throws {
+        try withTempDir { dir in
+            let long = String(repeating: "x", count: 200_000)   // > 64KB chunk
+            let file = try dir["long.txt"].write("\(long)\nshort\n")
+            let got = Array(try file.open().lines)
+            #expect(got.count == 2)
+            #expect(got[0] == long)
+            #expect(got[1] == "short")
+        }
+    }
+
+    @Test func emptyFileYieldsNothing() throws {
+        try withTempDir { dir in
+            let file = try dir["empty.txt"].write("")
+            #expect(Array(try file.open().lines).isEmpty)
+        }
+    }
+
+    @Test func fsSugar() throws {
+        try withTempDir { dir in
+            try dir["f.txt"].write("x\ny\n")
+            #expect(Array(dir["f.txt"].lines) == ["x", "y"])
+            // error nodes iterate as empty, SwiftyJSON style
+            #expect(Array(dir["ghost.txt"].lines).isEmpty)
+            // so do directories
+            #expect(Array(dir.lines).isEmpty)
+        }
+    }
+
+    @Test func singlePass() throws {
+        try withTempDir { dir in
+            let io = try dir["f.txt"].write("a\nb\n").open()
+            var it = io.lines.makeIterator()
+            #expect(it.next() == "a")
+            #expect(Array(io.lines) == ["b"])   // same stream, where it left off
+        }
+    }
+
+    @Test func closedThrows() throws {
+        try withTempDir { dir in
+            let io = try dir["f.txt"].write("x\n").open()
+            try io.close()
+            #expect(throws: Errno.badFileDescriptor) { try io.readLine() }
+            #expect(Array(io.lines).isEmpty)    // sugar stays quiet
+        }
+    }
+
+    @Test func invalidUTF8() throws {
+        try withTempDir { dir in
+            let bad = Data([0x61, 0xFF, 0xFE, 0x0A, 0x62, 0x0A])   // "a??\nb\n"
+            let file = try dir["bin.dat"].write(bad)
+            // the primitive raises...
+            #expect(throws: Errno.invalidArgument) { try file.open().readLine() }
+            // ...the sugar repairs and carries on
+            let got = Array(try file.open().lines)
+            #expect(got.count == 2)
+            #expect(got[1] == "b")
+        }
+    }
+}
+
 @Suite struct Qx {
     @Test func capturesOutput() throws {
         #expect(try IO.qx("echo hello") == "hello\n")
