@@ -47,6 +47,9 @@ public final class IO {
     /// Read-ahead for line iteration; may hold a slice, so index
     /// via `startIndex`, never `0`.
     internal var readBuffer = Data()
+    /// The stream feeding this one in a `|` pipeline — retained so
+    /// intermediate stages outlive the expression, closed in cascade.
+    internal var upstream: IO?
     public private(set) var isClosed = false
     /// Exit status of the piped process — or, for URL streams, the
     /// HTTP status — available after `close()`.
@@ -289,6 +292,10 @@ public final class IO {
             process.waitUntilExit()
             terminationStatus = process.terminationStatus
             self.process = nil
+        }
+        if let upstream {
+            self.upstream = nil
+            try? upstream.close()
         }
         if let pendingError { throw pendingError }
         return terminationStatus

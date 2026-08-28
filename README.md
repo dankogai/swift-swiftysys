@@ -67,6 +67,7 @@ try FS("draft.txt") > "final.txt"           // write; throws if target exists
 try FS("draft.txt") >! "final.txt"          // csh's >! — clobbers
 try FS("/var/log/a.log") >> "all.log"       // append; target must exist
 try IO.open("make 2>&1 |") >>! "build.log"  // append; creates if absent
+try FS("words.txt") | "sort -u" >! "sorted.txt"   // and | is the pipe
 
 // ---- HTTPS: the secure web ----
 try IO.HTTPS("example.com").get().bodyString            // that's a GET
@@ -396,6 +397,39 @@ try FS("src") !< "dst"               // mirrors, bang mirrored too
 the source in `FS(...)` to say you mean a file. One parsing note:
 the `>>`-family binds tighter than `+`, so build target paths into a
 variable rather than concatenating inline.
+
+## The pipe operator
+
+And `|` is the shell's pipe: an `FS` node or `IO` stream on the left
+feeds the command on the right, the result is an `IO` reading its
+stdout — so pipes chain, and the usual pair of temperaments picks the
+right-hand type: a `String` goes through the shell (sugar for
+literals), an `[String]` argv runs directly, nothing to inject:
+
+```swift
+try FS("words.txt") | "sort -u" | "wc -l"       // shell, for literals
+try FS("access.log") | ["grep", userInput]      // argv — NO shell
+for line in (try file | "sort").lines { ... }   // composes with lines
+try (file | "grep x").close()                   // the tail's $? on close
+```
+
+Swift hands `|` addition-level precedence, looser than `>` at
+comparison level — so redirection composes exactly like the shell,
+no parentheses:
+
+```swift
+try FS("words.txt") | "sort -u" >! "sorted.txt"
+```
+
+(The `>>`-family sits at shift precedence, *tighter* than `|` —
+appending a pipeline needs parens: `try (node | "sort") >>! "log"`.)
+
+The plumbing is kernel-level where it can be: a file or an unread
+stream hands its descriptor straight to the child, so a 10GB
+pipeline never flows through your process; only `readLine()`
+read-ahead needs a pump thread. `String` does not stand on the
+*left* of `|`, same rule as redirection: wrap it in `FS(...)` to
+mean a file.
 
 ## `IO.HTTPS` / `IO.HTTP` — the web
 

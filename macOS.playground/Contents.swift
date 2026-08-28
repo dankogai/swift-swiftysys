@@ -187,6 +187,17 @@ try demo["hello.txt"] >>! (demo.pathString + "/all.txt")  // node → append
 try IO.readPipe(from: ["date"]) >>! (demo.pathString + "/all.txt")  // stream → append
 FS(demo.pathString + "/all.txt").string
 
+//: ## The pipe operator — `|` is the shell's pipe
+//: FS or IO on the left, command on the right; pipes chain.
+//: String command = shell (for literals); [String] = argv, NO shell.
+try (demo["numbers.txt"] | "sort" | "tr -d '\\n'").readString()   // "123"
+try (demo["numbers.txt"] | ["sort", "-r"]).readString()           // "3\n2\n1\n"
+//: `|` binds tighter than `>` — redirection composes sans parens:
+try demo["numbers.txt"] | "sort" >! (demo.pathString + "/sorted.txt")
+demo["sorted.txt"].string                // "1\n2\n3\n"
+//: ...and the tail's exit status is the shell's `$?`:
+try (demo["numbers.txt"] | "grep 42").close()                     // 1 — no match
+
 //: ## open3 — stdout and stderr, separately (IPC::Open3)
 let p3 = try IO.open3("echo output; echo diagnostics >&2")
 try p3.stdout.readString()               // "output\n"

@@ -380,6 +380,108 @@ private func withTempDir(_ body: (FS) throws -> Void) throws {
     }
 }
 
+@Suite struct Pipelines {
+    @Test func fsThroughCommand() throws {
+        try withTempDir { dir in
+            let file = try dir["words.txt"].write("banana\napple\ncherry\napple\n")
+            #expect(try (file | "sort -u").readString() == "apple\nbanana\ncherry\n")
+        }
+    }
+
+    @Test func pipesChain() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("b\na\nc\n")
+            let io = try file | "sort" | "tr a-z A-Z"
+            #expect(try io.readString() == "A\nB\nC\n")
+            #expect(try io.close() == 0)
+        }
+    }
+
+    @Test func argvFormNoShell() throws {
+        try withTempDir { dir in
+            let evil = "$(whoami) | `date` > x\n"
+            let file = try dir["f.txt"].write(evil)
+            // metacharacters flow through as data, not shell
+            #expect(try (file | ["cat"]).readString() == evil)
+            #expect(try (file | ["tr", "a-z", "A-Z"] | ["cat"]).readString()
+                    == "$(WHOAMI) | `DATE` > X\n")
+        }
+    }
+
+    @Test func ioSourceDonatesItsDescriptor() throws {
+        let io = try IO.open("printf 'b\\na\\n' |") | "sort"
+        #expect(try io.readString() == "a\nb\n")
+        #expect(try io.close() == 0)
+    }
+
+    @Test func readAheadIsPumped() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("one\ntwo\nthree\n")
+            let io = try file.open()
+            #expect(try io.readLine() == "one")     // buffers ahead
+            // the pipeline must carry the buffered remainder, not lose it
+            #expect(try (io | "cat").readString() == "two\nthree\n")
+        }
+    }
+
+    @Test func redirectionComposesLikeTheShell() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("b\na\n")
+            // | binds tighter than >! — no parentheses, just like sh
+            try file | "sort" >! dir.path.appending("sorted.txt").string
+            #expect(dir["sorted.txt"].string == "a\nb\n")
+        }
+    }
+
+    @Test func linesCompose() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("b\na\nc\n")
+            #expect(Array(try (file | "sort").lines) == ["a", "b", "c"])
+        }
+    }
+
+    @Test func exitStatusIsTheTails() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("x\n")
+            let io = try file | "grep nope"
+            #expect(try io.readAll().isEmpty)
+            #expect(try io.close() == 1)            // the shell's $?
+        }
+    }
+
+    @Test func bigDataFlowsWithoutDeadlock() throws {
+        try withTempDir { dir in
+            // far beyond the 64KB pipe buffer, through two stages
+            let blob = Data((0..<300_000).map { UInt8($0 % 251) })
+            let file = try dir["big.dat"].write(blob)
+            #expect(try (file | ["cat"] | ["cat"]).readAll() == blob)
+        }
+    }
+
+    @Test func errorNodesThrow() throws {
+        try withTempDir { dir in
+            #expect(throws: Errno.noSuchFileOrDirectory) {
+                try dir["ghost.txt"] | "cat"
+            }
+        }
+    }
+
+    @Test func closedSourceThrows() throws {
+        try withTempDir { dir in
+            let io = try dir["f.txt"].write("x\n").open()
+            try io.close()
+            #expect(throws: Errno.badFileDescriptor) { try io | "cat" }
+        }
+    }
+
+    @Test func emptyArgvThrows() throws {
+        try withTempDir { dir in
+            let file = try dir["f.txt"].write("x\n")
+            #expect(throws: Errno.invalidArgument) { try file | [] }
+        }
+    }
+}
+
 @Suite struct Qx {
     @Test func capturesOutput() throws {
         #expect(try IO.qx("echo hello") == "hello\n")
