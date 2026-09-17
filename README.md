@@ -496,8 +496,12 @@ and add `"SwiftySys"` to your target dependencies.
 ### In the REPL
 
 ```sh
-swift run --repl
+swift run --repl --build-system native
 ```
+
+(Swift 6.4's default `swiftbuild` engine launches the REPL without
+the `-L` for its own products, so every symbol comes back
+"not present in the target" — `--build-system native` sidesteps it.)
 
 ```swift
 import SwiftySys
